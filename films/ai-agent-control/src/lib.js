@@ -3188,10 +3188,12 @@
     const dp = clamp(s.dev || 0);
     if (dp > 0) {
       const D = G.DEV;
-      ui.node(ctx, D.x, D.y, D.w, D.h, { p: dp, label: 'разработчик', size: 30, align: 'left', icon: null });
+      ui.node(ctx, D.x, D.y, D.w, D.h, { p: dp, size: 30, align: 'left', icon: null });
       ctx.save();
       ctx.globalAlpha *= clamp(dp * 1.6);
       ui.user(ctx, D.x - D.w / 2 + 52, D.y, 60);
+      // label starts after the user mark and stays clear of the stop button (right − 50)
+      ui.label(ctx, 'разработчик', D.x - D.w / 2 + 96, D.y + 1, { size: 30, weight: 600, baseline: 'middle', maxW: D.w - 96 - 90 });
       ctx.restore();
       const st = clamp(s.devStop || 0);
       if (st > 0) {
