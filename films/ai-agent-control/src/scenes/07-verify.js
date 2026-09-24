@@ -68,7 +68,7 @@
   }
 
   function drawHistory(ctx, L, t) {
-    const P = L.pal, ui = L.ui, E = L.ease;
+    const P = L.pal, ui = L.ui;
     const k = ui.kf(t, 0, 6 * FR, 'outCubic');
     ctx.save();
     ctx.globalAlpha *= clamp(k * 1.2);
@@ -144,11 +144,11 @@
         }
       }
     }
-    void E;
     ctx.restore();
   }
 
-  function appState(t, T) {
+  /** ui.app state at shot time t. «оплат» is typed one letter per 16th: 36.5, 36.625 … 37.0 (the five key clicks). */
+  function appState(ui, t, T) {
     const typedN = t >= B_TYPE - 1e-6 ? Math.min(QUERY.length, Math.floor((t - B_TYPE) * 8 + 1e-6) + 1) : 0;
     const q = QUERY.slice(0, typedN);
     const typing = t >= B_TYPE - 1e-6 && t < B_TYPE + 0.5 + 2 * FR;
@@ -159,12 +159,8 @@
       caret: true,
       t: typing ? 0 : T, // solid caret while typing, blinking otherwise
       filter: t >= B_FILTER - 1e-6 ? (t - B_FILTER + FR) / (B_PASS - B_FILTER) : 0,
-      mark: L_kf(t, B_PASS, 4 * FR),
+      mark: ui.kf(t, B_PASS, 4 * FR),
     };
-  }
-  // ui.kf without the lib handle (same maths: visible on the beat frame)
-  function L_kf(t, t0, dur) {
-    return t < t0 - 1e-6 ? 0 : clamp((t - t0 + FR) / dur);
   }
 
   /** The compact app: top 404 design px only, its bottom 30 px dissolving into the plate. */
@@ -267,7 +263,7 @@
       drawSlot(ctx, L, t, kA);
       if (kA > 0) {
         const x = lerp(1100, APP.x, kA);
-        drawApp(ctx, L, x, appState(t, T));
+        drawApp(ctx, L, x, appState(ui, t, T));
       }
 
       // 5 the green test badge

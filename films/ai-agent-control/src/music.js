@@ -1309,34 +1309,708 @@
   }
 
   // ---------------------------------------------------------------- the score
-  // DEMO SCORE — replace wholesale when composing the film. It gives the stub pass a pulse and
-  // shows the engine idiom: instruments take absolute global times, score() is re-invoked per bar
-  // and the engine windows each call, so scheduling the whole piece here is correct. Everything
-  // below derives from FILM.TIMELINE, so it runs at any bpm and duration.
+  // «Кто контролирует работу AI-агента?» — E major, 120 bpm, 30 bars (docs/storyboard.md, Structure).
+  //   0–6.5   «магия»: air in, dry typing, the send click at 2.0 and a short bright lift on E (kick on the
+  //           beats, pluck E–G#–B on 8ths, sub), the «Готово» stab at 5.0; cut dead on «пока» at 6.5.
+  //   6.5–21  «риск»: an A pedal in A minor colour, sub drone and a slow low pulse that tightens into the
+  //           stop-frame at 12.5 (near-silence, one muffled beep); the drone creeps back from 13.0 under
+  //           the chaos, the tape-stop at 17.5, silence, and an even mechanical pulse from 18.5.
+  //   21–39   «инженерия»: layer pings on an open fifth, the third arrives with the warm Amaj9 pad at 25.0,
+  //           a B dominant pedal from 33.0 accelerates (8ths, then 16ths) into E major at 37.5.
+  //   39–60   «урок»: the music opens up (I–vi–IV–V, wide pad, bells), the tension drone leaves by 40.0,
+  //           IV–ii–V7 under the CTA and the final cadence on E at 55.0, held and faded out by 59.8.
+  // Room for the voice-over: pads high-passed by their bus and low-passed at 1.2–1.8 kHz, motifs above
+  // 1.2 kHz or in the sub, nothing busy in the mid-range while the captions run.
+  // Routing: every effect goes to sfx (air beds to amb), every musical element to a music bus. The perc
+  // bus is not a stem bus of render-audio.cjs, so the score folds it into drums. Sections that must stop
+  // dead (6.5, 12.5, 17.5) play through gated private buses with their own reverb: the gate closes dry
+  // and wet together, so no tail rings on, and each private bus follows its real bus's level, so
+  // --solo / --mute still silence it.
   const CH = {
-    home: ['D3', 'A3', 'D4', 'F#4'],
-    away: ['G3', 'B3', 'D4', 'G4'],
+    // act 1 lift, over E2 C#2 A1 B1 E2
+    lE: ['E3', 'B3', 'F#4', 'G#4'],
+    lCsm: ['E3', 'B3', 'C#4', 'G#4'],
+    lA: ['E3', 'A3', 'B3', 'C#4'],
+    lB: ['F#3', 'B3', 'D#4', 'E4'],
+    lE2: ['E3', 'B3', 'E4', 'G#4'],
+    // act 2 risk, over the A1 drone
+    Am: ['E3', 'A3', 'C4'],
+    // act 3, over the A1 then B1 pedal
+    A5: ['A3', 'E4', 'A4'],
+    Amaj9: ['A3', 'E4', 'G#4', 'B4', 'C#5'],
+    Fsm9: ['A3', 'C#4', 'F#4', 'G#4', 'E5'],
+    Amaj9s11: ['A3', 'C#4', 'G#4', 'B4', 'D#5'],
+    B11: ['A3', 'E4', 'F#4', 'B4', 'C#5'],
+    B7sus: ['A3', 'E4', 'F#4', 'B4'],
+    B7: ['A3', 'D#4', 'F#4', 'B4'],
+    Eres: ['E3', 'B3', 'E4', 'G#4', 'B4'],
+    // act 4
+    Eopen: ['E3', 'B3', 'F#4', 'G#4', 'B4', 'E5'],
+    Csm7: ['E3', 'G#3', 'C#4', 'E4', 'B4'],
+    Aadd9: ['E3', 'A3', 'C#4', 'E4', 'B4'],
+    Bsus4: ['F#3', 'B3', 'E4', 'F#4', 'B4'],
+    B: ['F#3', 'B3', 'D#4', 'F#4', 'B4'],
+    Fsm7: ['F#3', 'A3', 'C#4', 'E4'],
+    B7sus4: ['F#3', 'A3', 'B3', 'E4'],
+    B7f: ['F#3', 'A3', 'B3', 'D#4'],
+    Efinal: ['E3', 'B3', 'E4', 'G#4', 'B4', 'E5'],
   };
 
-  function score(E, I) {
-    const { kick, hat, kalimba, pad, sub } = I;
-    const bpm = (FILM.TIMELINE && FILM.TIMELINE.bpm) || 120;
-    const DUR = (FILM.TIMELINE && FILM.TIMELINE.duration) || 32;
-    const BAR = 240 / bpm;
-    const BEAT = 60 / bpm;
-    const motif = ['D5', 'F#5', 'A5', 'E5'];
-    for (let beat = 0; beat * BEAT < DUR - 1e-9; beat++) {
-      const t = Math.round(beat * BEAT * 1000) / 1000;
-      const down = beat % 4 === 0;
-      kick(t, down ? 0.8 : 0.5, down ? 'full' : 'felt');
-      hat(t + BEAT / 2, 0.1);
-      kalimba(t + BEAT / 2, hz(motif[beat % 4]), 0.2, { hall: 0.15, delay: 0.1, pan: beat % 2 ? 0.15 : -0.15 });
-      if (down) {
-        const home = beat % 8 === 0;
-        pad(t, Math.min(t + BAR, DUR), home ? CH.home : CH.away, 0.28, { att: 0.05, rel: 0.1, cut0: 900, cut1: 1400, hall: 0.15 });
-        sub(t, Math.min(t + BAR, DUR), home ? 'D2' : 'G1', 0.4, { att: 0.02, rel: 0.08 });
+  // ---- routing
+  const MUSIC_BUSES = ['drums', 'bass', 'pad', 'keys', 'bells', 'lead'];
+  // Bus-level reverb sends of the real buses, summed, for the private copies.
+  const GATE_SENDS = { drums: 0.1, bass: 0, pad: 0.22, keys: 0.3, bells: 0.45, lead: 0.35 };
+  // [id, open, close, reverb seconds]: music that must stop dead at `close`.
+  const GATES = [
+    ['lift', -1, 6.5, 1.3],
+    ['risk', 6.5, 12.5, 2.4],
+    ['creep', 13.0, 17.5, 2.4],
+  ];
+
+  function setupGates(E) {
+    if (E.gates) return;
+    E.gates = true;
+    const ctx = E.ctx;
+    const at = (T) => E.base + (T - E.start) - LAT;
+    for (const [id, t0, t1, secs] of GATES) {
+      const gate = E.gain(0);
+      gate.connect(E.master);
+      const g = gate.gain;
+      g.setValueAtTime(0, E.base);
+      const cClose = at(t1);
+      if (cClose > E.base) {
+        const cOpen = Math.max(E.base, at(t0) - 0.002);
+        g.setValueAtTime(1, cOpen);
+        g.setValueAtTime(1, Math.max(cOpen, cClose - 0.004));
+        g.linearRampToValueAtTime(0, cClose);
+      }
+      const verb = ctx.createConvolver();
+      verb.buffer = impulse(ctx, secs, 'gate-' + id, { pre: 0.012, bright: 0.5, dark: 0.1, early: 12, spread: 0.05 });
+      const wet = E.gain(0.9);
+      verb.connect(wet);
+      wet.connect(gate);
+      for (const name of MUSIC_BUSES) {
+        const lvl = E.bus[name].gain.value * (name === 'drums' ? 1.1 : 1);
+        const inp = E.gain(lvl);
+        let tail = inp;
+        if (name === 'pad') {
+          const h = E.filt('highpass', 180, 0.6);
+          inp.connect(h);
+          tail = h;
+        }
+        tail.connect(gate);
+        if (GATE_SENDS[name]) {
+          const s = E.gain(GATE_SENDS[name]);
+          tail.connect(s);
+          s.connect(verb);
+        }
+        const key = id + ':' + name;
+        E.bus[key] = inp;
+        E.tap[key] = {};
+        for (const k of ['room', 'hall', 'cave', 'delay']) {
+          const tg = E.gain(lvl);
+          tg.connect(verb);
+          E.tap[key][k] = tg;
+        }
       }
     }
+  }
+
+  // Run fn with bus names remapped (the instruments hard-code some buses).
+  function via(E, map, fn) {
+    const out = E.out;
+    E.out = (node, b, o) => out(node, map[b] || b, o);
+    try {
+      fn();
+    } finally {
+      E.out = out;
+    }
+  }
+  const MUSIC_MAP = { perc: 'drums' };
+  const SFX_MAP = { drums: 'sfx', perc: 'sfx', bass: 'sfx', pad: 'sfx', keys: 'sfx', bells: 'sfx', lead: 'sfx' };
+  const gateMap = (id) => {
+    const m = { perc: id + ':drums' };
+    for (const b of MUSIC_BUSES) m[b] = id + ':' + b;
+    return m;
+  };
+
+  // ---- film instruments (music)
+  // Dark drone: a sine root, two detuned warm saws and a soft octave through a low lowpass.
+  // o.amp and o.lp are envelope points from t0 (amp ends at 0 at t1 - t0).
+  function drone(E, t0, t1, note, o) {
+    const V = E.voice(t0, t1 - t0, true);
+    if (!V) return;
+    const f = hz(note);
+    const lp = E.filt('lowpass', o.lp[0][1], 0.8);
+    V.env(lp.frequency, o.lp);
+    const g = E.gain(0);
+    V.env(g.gain, o.amp);
+    for (const [type, k, det, a] of [
+      ['sine', 1, 0, 0.8],
+      [E.warmSaw, 1, -9, 0.32],
+      [E.warmSaw, 1, 8, 0.32],
+      ['sine', 2, 3, 0.2],
+    ]) {
+      const s = E.osc(type, f * k);
+      s.detune.value = det;
+      const sg = E.gain(a);
+      s.connect(sg);
+      sg.connect(lp);
+      V.osc(s);
+    }
+    lp.connect(g);
+    E.out(g, 'bass', o);
+  }
+
+  // ---- film instruments (effects, all on sfx)
+  // Keyboard typing rendered into one grain buffer: each keystroke is a switch tick, a cap clack, a
+  // desk thock and a release tick. hits: [[dt, vel, pan, big]]
+  function typing(E, I, t, hits, vel, key) {
+    const secs = hits[hits.length - 1][0] + 0.17;
+    I.play(
+      t,
+      secs,
+      () => {
+        const r = lib.rng(lib.hash('film-keys', key));
+        const g = [];
+        for (const [dt, v, pan, big] of hits) {
+          g.push({ t: dt, dur: 0.012, amp: 1.1 * v, pan, f: 2800 + r() * 2200, q: 1.3, att: 0.0003, dec: 0.0014 });
+          g.push({ t: dt + 0.0008, dur: 0.035, amp: 0.8 * v, pan, f: (big ? 650 : 950) + r() * 450, q: 1.6, att: 0.0008, dec: big ? 0.009 : 0.0055 });
+          g.push({ t: dt + 0.0012, dur: 0.05, amp: 0.3 * v, pan, f: big ? 140 : 190 + r() * 50, sine: true, att: 0.0012, dec: big ? 0.014 : 0.008 });
+          g.push({ t: dt + 0.075 + r() * 0.035, dur: 0.01, amp: 0.3 * v, pan, f: 3200 + r() * 1800, q: 1.4, att: 0.0003, dec: 0.001 });
+        }
+        return grainBuffer(E.ctx, key, secs, g);
+      },
+      vel,
+      { bus: 'sfx' }
+    );
+  }
+
+  // Tuned high sparkle: sine grains on E major pentatonic, octaves 7–8. o: rate, amp, circle (pan period).
+  function shimmer(E, I, t, secs, key, o) {
+    const scale = ['E7', 'F#7', 'G#7', 'B7', 'C#8', 'E8'].map(hz);
+    I.play(
+      t,
+      secs,
+      () => {
+        const r = lib.rng(lib.hash('film-shimmer', key));
+        const g = [];
+        const n = Math.floor(secs * (o.rate || 30));
+        for (let i = 0; i < n; i++) {
+          const u = i / n;
+          const tt = u * (secs - 0.15) + r() * 0.01;
+          const pan = o.circle ? Math.sin((TAU * tt) / o.circle) * 0.85 : (r() * 2 - 1) * 0.8;
+          const env = o.fade ? Math.pow(1 - u, 1.5) : Math.sin(Math.PI * Math.min(1, u * 1.1));
+          g.push({ t: tt, dur: 0.14, amp: o.amp * env * (0.45 + 0.55 * r()), pan, f: scale[Math.floor(r() * scale.length)], sine: true, att: 0.003, dec: 0.035 });
+        }
+        return grainBuffer(E.ctx, key, secs, g);
+      },
+      1,
+      { bus: 'sfx', hall: 0.3 }
+    );
+  }
+
+  // Glitch zip: a chopped saw sweeping f0 → f1.
+  function zip(E, t, len, f0, f1, vel, pan, rate) {
+    const V = E.voice(t, len + 0.01, false);
+    if (!V) return;
+    const s = E.osc('sawtooth', f0);
+    V.env(s.frequency, [[0, f0], [len, f1, 'exp']]);
+    const chop = E.gain(0.5);
+    const lfo = E.osc('square', rate);
+    const lg = E.gain(0.5);
+    lfo.connect(lg);
+    lg.connect(chop.gain);
+    const hp = E.filt('highpass', 900, 0.7);
+    const pk = E.filt('peaking', 3200, 1);
+    pk.gain.value = 4;
+    const g = E.gain(0);
+    V.env(g.gain, [[0, 0], [0.002, vel], [len * 0.6, vel * 0.7, 'lin'], [len, FLOOR, 'exp']]);
+    s.connect(chop);
+    chop.connect(hp);
+    hp.connect(pk);
+    pk.connect(g);
+    E.out(g, 'sfx', { pan, room: 0.1 });
+    V.osc(s);
+    V.osc(lfo);
+  }
+
+  // Tape-stop: a saw chord whose speed runs down linearly while the lowpass closes.
+  function tapeStop(E, t, len, notes, vel) {
+    const V = E.voice(t, len + 0.02, false);
+    if (!V) return;
+    const lp = E.filt('lowpass', 3400, 0.9);
+    V.env(lp.frequency, [[0, 3400], [len, 110, 'exp']]);
+    const g = E.gain(0);
+    V.env(g.gain, [[0, 0], [0.003, vel], [len * 0.55, vel * 0.75, 'lin'], [len, FLOOR, 'exp']]);
+    for (const n of notes) {
+      for (const d of [-8, 8]) {
+        const f = hz(n);
+        const s = E.osc(E.warmSaw, f);
+        s.detune.value = d;
+        V.env(s.frequency, [[0, f], [len, f * 0.05, 'lin']]);
+        const sg = E.gain(0.55 / notes.length);
+        s.connect(sg);
+        sg.connect(lp);
+        V.osc(s);
+      }
+    }
+    lp.connect(g);
+    E.out(g, 'sfx', { room: 0.1 });
+  }
+
+  // Muffled beep: a lowpassed square, no siren.
+  function mbeep(E, t, f, len, vel) {
+    const V = E.voice(t, len + 0.02, false);
+    if (!V) return;
+    const s = E.osc('square', f);
+    const lp = E.filt('lowpass', 1250, 0.7);
+    const lp2 = E.filt('lowpass', 2000, 0.6);
+    const g = E.gain(0);
+    V.env(g.gain, [[0, 0], [0.004, vel], [len - 0.025, vel * 0.8, 'lin'], [len, 0, 'lin']]);
+    s.connect(lp);
+    lp.connect(lp2);
+    lp2.connect(g);
+    E.out(g, 'sfx', { room: 0.12 });
+    V.osc(s);
+  }
+
+  // Dull thud: a falling low sine and a muffled knock. o: f0, f1, dec, lp.
+  function thud(E, t, vel, o) {
+    o = o || {};
+    const dec = o.dec || 0.3;
+    const V = E.voice(t, dec + 0.02, false);
+    if (!V) return;
+    const s = E.osc('sine', o.f0 || 120);
+    V.env(s.frequency, [[0, o.f0 || 120], [0.05, o.f1 || 58, 'exp'], [dec, (o.f1 || 58) * 0.8, 'exp']]);
+    const g = E.gain(0);
+    V.env(g.gain, [[0, 0], [0.003, vel], [0.08, vel * 0.5, 'exp'], [dec, FLOOR, 'exp']]);
+    s.connect(g);
+    E.out(g, 'sfx');
+    V.osc(s);
+    const n = E.noise(V, ['thud', t]);
+    const lp = E.filt('lowpass', o.lp || 900, 0.8);
+    const ng = E.gain(0);
+    V.env(ng.gain, perc(vel * 0.7, 0.001, 0.035));
+    n.connect(lp);
+    lp.connect(ng);
+    E.out(ng, 'sfx', { room: 0.15 });
+  }
+
+  // Question tone: two muted triangles a minor second apart, lifting at the end like a question.
+  function question(E, t, vel) {
+    const len = 0.85;
+    const V = E.voice(t, len + 0.02, false);
+    if (!V) return;
+    const lp = E.filt('lowpass', 1300, 0.7);
+    const g = E.gain(0);
+    V.env(g.gain, [[0, 0], [0.012, vel], [0.35, vel * 0.7, 'lin'], [len, FLOOR, 'exp']]);
+    for (const n of ['A3', 'Bb3']) {
+      const f = hz(n);
+      const s = E.osc('triangle', f);
+      V.env(s.frequency, [[0, f * 0.985], [0.05, f, 'exp'], [0.45, f, 'lin'], [0.8, f * 1.06, 'exp']]);
+      s.connect(lp);
+      V.osc(s);
+    }
+    lp.connect(g);
+    E.out(g, 'sfx', { room: 0.2 });
+  }
+
+  // A short whoosh: band-passed stereo noise, fast front, filter sweep f (pts), peak at `peak`.
+  function whoosh(I, t, len, f, vel, o) {
+    o = o || {};
+    const pk = o.peak || len * 0.4;
+    I.nz(t, len, {
+      type: 'bandpass',
+      q: o.q || 0.8,
+      f,
+      amp: [[0, 0], [o.att || 0.008, vel * (o.front || 0.4)], [pk, vel, 'exp'], [len, FLOOR, 'exp']],
+      stereo: true,
+      sustain: true,
+      panEnv: o.pan || null,
+      bus: o.bus || 'sfx',
+      hall: o.hall || 0.15,
+      key: 'wh' + t,
+    });
+  }
+
+  // ---- act 1: «магия» (gated at 6.5)
+  function lift(E, I) {
+    const { kick, hat, shaker, sub, pad, pluck, glock, glass, stab } = I;
+    const CUT = 6.5;
+    // 0–2: a soft sine glow under the typing
+    pad(0.0, 2.0, ['B4', 'E5', 'G#5'], 0.07, { sine: true, att: 1.7, rel: 0.02, cut0: 3000, width: 0.35 });
+    // 2.0: the lift
+    const bassline = [[2.0, 3.0, 'E2'], [3.0, 4.0, 'C#2'], [4.0, 4.5, 'A1'], [4.5, 5.0, 'B1'], [5.0, CUT, 'E2']];
+    for (const [a, b, n] of bassline) sub(a, b === CUT ? b - 0.006 : b, n, 0.5, { att: 0.006, rel: b === CUT ? 0.006 : 0.03, sus: 0.8 });
+    const chords = [[2.0, 3.0, CH.lE], [3.0, 4.0, CH.lCsm], [4.0, 4.5, CH.lA], [4.5, 5.0, CH.lB], [5.0, CUT, CH.lE2]];
+    for (const [a, b, notes] of chords) pad(a, b === CUT ? b - 0.008 : b, notes, 0.15, { att: 0.02, rel: b === CUT ? 0.008 : 0.06, cut0: 1500, cut1: 1800, width: 0.5 });
+    for (let k = 0; k < 9; k++) {
+      const t = 2 + k * 0.5;
+      const down = k % 2 === 0;
+      kick(t, t === 5 ? 0.6 : down ? 0.52 : 0.4, down || t === 5 ? 'full' : 'felt');
+      hat(t + 0.25, 0.09);
+    }
+    for (let k = 0; k < 12; k++) if (k % 2) shaker(5 + k * 0.125, 0.06);
+    // pluck motif E–G#–B on 8ths (an octave above the cue's E5, clear of the voice), a 6-note cycle
+    const arp = ['E6', 'G#6', 'B6', 'E7', 'B6', 'G#6'];
+    for (let k = 0; k < 18; k++) {
+      const t = 2 + k * 0.25;
+      pluck(t, arp[k % 6], k % 6 === 0 ? 0.14 : 0.11, { dec: 0.4, pan: k % 2 ? 0.3 : -0.3, room: 0.1 });
+    }
+    // 5.0 «Готово»: warm major stab, top of the lift, with a high sparkle
+    stab(5.0, ['E4', 'G#4', 'B4', 'E5'], 0.2, { f: 1700, len: 0.32 });
+    glass(5.0, hz('B6'), 0.06, { dec: 1.2 });
+    glass(5.0, hz('E7'), 0.05, { dec: 1.4 });
+    for (const [t, n] of [[5.5, 'G#6'], [6.0, 'B6']]) glock(t, hz(n), 0.05, { dec: 0.8 });
+  }
+
+  // ---- act 2a: «риск» (6.5–12.5, gated)
+  function risk(E, I) {
+    const { kick, pad, tock, subDrop } = I;
+    const T0 = 6.5;
+    const T1 = 12.5;
+    // slow low pulse: half notes, beats from 10.0, 8ths from 11.5
+    const pulses = [6.5, 7.5, 8.5, 9.5, 10, 10.5, 11, 11.5, 11.75, 12, 12.25];
+    pulses.forEach((t) => kick(t, t === T0 ? 0.62 : 0.36 + (0.14 * (t - T0)) / 6, 'heart'));
+    subDrop(T0, 110, 55, 1.2, 0.3);
+    const v = 0.5;
+    const amp = [[0, 0], [0.02, v]];
+    for (const t of pulses) {
+      const dt = t - T0;
+      if (dt > 0) amp.push([dt, v * 0.7, 'lin'], [dt + 0.05, v, 'lin']);
+    }
+    amp.push([T1 - T0 - 0.006, v, 'lin'], [T1 - T0, 0, 'lin']);
+    drone(E, T0, T1, 'A1', { amp, lp: [[0, 230], [4.0, 260, 'exp'], [5.0, 380, 'exp'], [6.0, 520, 'exp']] });
+    // dark A minor pad, and a thin high A–Bb rub that swells from the question into the stop-frame
+    pad(T0, T1 - 0.008, CH.Am, 0.1, { att: 0.03, rel: 0.008, cut0: 500, cut1: 900, width: 0.6 });
+    pad(8.5, T1 - 0.008, ['A6', 'Bb6'], 0.035, { sine: true, att: 3.9, rel: 0.008, cut0: 6000, width: 0.7 });
+    // ticking from 10.0, 8ths, growing
+    for (let k = 0; k < 10; k++) {
+      const t = 10 + k * 0.25;
+      tock(t, 0.05 + 0.006 * k, 2400, { bus: 'drums', dec: 0.02, pan: k % 2 ? 0.15 : -0.15 });
+    }
+  }
+
+  // ---- act 2b: the drone creeps back (13.0–17.5, gated)
+  function creep(E, I) {
+    const { kick, pad } = I;
+    const T0 = 13.0;
+    const T1 = 17.5;
+    const pulses = [14.5, 15.5, 16, 16.5, 17, 17.25];
+    pulses.forEach((t) => kick(t, 0.3 + 0.05 * (t - 14.5), 'heart'));
+    const amp = [[0, 0], [1.8, 0.3, 'lin']];
+    for (const t of pulses) {
+      const dt = t - T0;
+      const lv = 0.3 + 0.08 * (t - 14.5);
+      amp.push([dt, lv * 0.72, 'lin'], [dt + 0.05, lv, 'lin']);
+    }
+    amp.push([T1 - T0 - 0.006, 0.55, 'lin'], [T1 - T0, 0, 'lin']);
+    drone(E, T0, T1, 'A1', { amp, lp: [[0, 200], [2.5, 260, 'exp'], [4.5, 480, 'exp']] });
+    pad(T0, T1 - 0.008, CH.Am, 0.09, { att: 2.0, rel: 0.008, cut0: 420, cut1: 1000, width: 0.6 });
+    pad(15.5, T1 - 0.008, ['A6', 'Bb6'], 0.03, { sine: true, att: 2.0, rel: 0.008, cut0: 6000, width: 0.8 });
+  }
+
+  // ---- act 3: «инженерия» (18.5–39)
+  function system(E, I) {
+    const { kick, tock, hat, pad, sub, glass, glock, fmBell, crash } = I;
+    // 18.5–33: the even mechanical pulse, muted tick on 8ths, soft low thump on beats
+    for (let k = 0; 18.5 + k * 0.25 < 33 - 1e-9; k++) {
+      const t = 18.5 + k * 0.25;
+      if (t === 30.5 || t === 30.75) continue; // the machine halts on the «stop» thud
+      const beat = k % 2 === 0;
+      tock(t, beat ? 0.085 : 0.055, 2600, { bus: 'drums', dec: 0.018, pan: beat ? 0.1 : -0.1 });
+      if (beat) kick(t, t < 25 ? 0.26 : 0.3, 'thud');
+    }
+    // the tension layer: A1 pedal, then the B1 dominant pedal, then it leaves on E by 40.0
+    drone(E, 18.5, 33.0, 'A1', { amp: [[0, 0], [2.0, 0.3, 'lin'], [6.5, 0.3, 'lin'], [7.5, 0.36, 'lin'], [14.4, 0.36, 'lin'], [14.5, 0, 'lin']], lp: [[0, 220], [6.5, 260, 'exp'], [14.5, 300, 'exp']] });
+    drone(E, 33.0, 37.5, 'B1', { amp: [[0, 0], [0.05, 0.38, 'lin'], [4.44, 0.5, 'lin'], [4.5, 0, 'lin']], lp: [[0, 280], [4.5, 520, 'exp']] });
+    drone(E, 37.5, 40.0, 'E2', { amp: [[0, 0], [0.02, 0.36, 'lin'], [2.5, 0, 'lin']], lp: [[0, 420], [2.5, 140, 'exp']] });
+    // 21.0–25: an open fifth, and one high ping per layer, rising (the third is withheld)
+    pad(21.0, 25.0, CH.A5, 0.09, { sine: true, att: 2.5, rel: 0.5, cut0: 1200, width: 0.4 });
+    [[21.5, 'E6'], [22.5, 'A6'], [23.5, 'B6'], [24.5, 'E7']].forEach(([t, n], i) => glass(t, hz(n), 0.05, { dec: 1.8, hall: 0.25, pan: -0.3 + i * 0.2 }));
+    // 25.0: the third arrives, a warm Amaj9 pad (orange: allowed)
+    const warm = [[25, 29, CH.Amaj9], [29, 31, CH.Fsm9], [31, 33, CH.Amaj9s11], [33, 35, CH.B11], [35, 36.5, CH.B7sus], [36.5, 37.5, CH.B7]];
+    for (const [a, b, notes] of warm) {
+      pad(a, b === 37.5 ? b - 0.02 : b, notes, 0.2, {
+        att: a === 25 ? 1.0 : 0.08,
+        rel: b === 37.5 ? 0.02 : 0.12,
+        cut0: a === 25 ? 600 : a >= 35 ? 1300 : 1300,
+        cut1: a >= 35 ? 2400 : 1400,
+        width: 0.7,
+        hall: 0.15,
+      });
+    }
+    fmBell(25.0, hz('C#6'), 0.08, { ratio: 2, index: 1.2, dec: 2.4, hall: 0.3, delay: 0.15 });
+    glock(25.0, hz('G#6'), 0.05, { dec: 2.0 });
+    // 33–37.5: the rhythm accelerates, hats on 8ths, 16ths from 35.0
+    for (let k = 0; k < 9; k++) {
+      const t = 33 + k * 0.5;
+      kick(t, 0.36 + 0.025 * k, 'felt');
+      E.duck(t, 0.3);
+    }
+    for (let k = 0; k < 8; k++) hat(33 + k * 0.25, k % 2 ? 0.075 : 0.05);
+    for (let k = 0; k < 20; k++) hat(35 + k * 0.125, 0.035 + (0.05 * k) / 20 + (k % 2 ? 0 : 0.015));
+    // 37.5: the test passes, E major resolves (root position, no added notes)
+    pad(37.5, 39.0, CH.Eres, 0.24, { att: 0.01, rel: 0.12, cut0: 2400, cut1: 1500, width: 0.8, hall: 0.2 });
+    sub(37.5, 39.0, 'E2', 0.5, { att: 0.006, rel: 0.05 });
+    kick(37.5, 0.62, 'full');
+    E.duck(37.5, 0.4);
+    crash(37.5, 0.1, { dec: 2.2, pan: 0.2 });
+    glock(37.5, hz('E6'), 0.11, { dec: 2.4 });
+    glock(37.5, hz('G#6'), 0.08, { dec: 2.2 });
+    glock(37.5, hz('B6'), 0.08, { dec: 2.2 });
+    glass(37.5, hz('E7'), 0.05, { dec: 2.5 });
+    kick(38.0, 0.3, 'felt');
+    kick(38.5, 0.34, 'felt');
+    for (const t of [37.75, 38.25, 38.75]) hat(t, 0.05);
+  }
+
+  // ---- act 4: «урок» (39–60)
+  function lessonMusic(E, I) {
+    const { kick, hat, shaker, sub, pad, pluck, glock, crash, gong } = I;
+    const prog = [
+      [39, 41, CH.Eopen, 'E2'],
+      [41, 43, CH.Csm7, 'C#2'],
+      [43, 45, CH.Aadd9, 'A1'],
+      [45, 46, CH.Bsus4, 'B1'],
+      [46, 47, CH.B, 'B1'],
+      [47, 49, CH.Csm7, 'C#2'],
+      [49, 51, CH.Aadd9, 'A1'],
+      [51, 52, CH.Bsus4, 'B1'],
+      [52, 53, CH.Aadd9, 'A1'],
+      [53, 54, CH.Fsm7, 'F#1'],
+      [54, 54.5, CH.B7sus4, 'B1'],
+      [54.5, 55, CH.B7f, 'B1'],
+    ];
+    for (const [a, b, notes, root] of prog) {
+      const rise = a === 51;
+      pad(a, b, notes, rise ? 0.17 : 0.18, { att: rise ? 0.4 : 0.06, rel: 0.12, cut0: rise ? 1200 : 1500, cut1: rise ? 3000 : 1700, width: 0.9, hall: 0.2 });
+      if (a < 52) {
+        // bouncing sub on the beats, the third beat up an octave
+        for (let t = a; t < b - 1e-9; t += 0.5) {
+          const up = Math.round((t - a) / 0.5) === 2;
+          sub(t, t + 0.4, up ? root.replace(/\d/, (d) => String(Number(d) + 1)) : root, 0.42, { att: 0.005, rel: 0.06 });
+        }
+      } else sub(a, b, root, 0.42, { att: 0.02, rel: 0.05 });
+    }
+    // drums 39–52: kick on the beats (pumping pad and bass), offbeat hats, 16th shaker from 45
+    for (let k = 0; 39 + k * 0.5 < 52 - 1e-9; k++) {
+      const t = 39 + k * 0.5;
+      const change = t % 2 === 1;
+      kick(t, change ? 0.55 : 0.44, change ? 'full' : 'felt');
+      E.duck(t, 0.45);
+      hat(t + 0.25, 0.08);
+      if (t >= 45) {
+        shaker(t + 0.125, 0.035);
+        shaker(t + 0.375, 0.045);
+      }
+    }
+    crash(39.0, 0.09, { dec: 2.5, pan: -0.2 });
+    // bells: dotted-quarter figures on chord tones, high, into the ping-pong delay
+    const bells = [
+      [39, ['B6', 'G#6', 'E6']],
+      [41, ['C#7', 'G#6', 'E6']],
+      [43, ['C#7', 'A6', 'E6']],
+      [45, ['B6', 'F#6', 'D#6']],
+      [47, ['E7', 'C#7', 'G#6']],
+      [49, ['E7', 'C#7', 'A6']],
+    ];
+    for (const [a, ns] of bells) ns.forEach((n, i) => glock(a + i * 0.75, hz(n), 0.07, { dec: 1.4, delay: 0.2, pan: i % 2 ? 0.35 : -0.35 }));
+    // 47–51.5: assembly, a light high pluck on 8ths
+    const asm = { 47: ['C#6', 'G#6', 'E6', 'B6'], 48: ['C#6', 'G#6', 'E6', 'B6'], 49: ['A5', 'E6', 'C#6', 'B6'], 50: ['A5', 'E6', 'C#6', 'B6'], 51: ['B5', 'F#6', 'E6', 'B6'] };
+    for (let k = 0; 47 + k * 0.25 < 51.5 - 1e-9; k++) {
+      const t = 47 + k * 0.25;
+      pluck(t, asm[Math.floor(t)][k % 4], 0.05 + 0.02 * (k / 18), { dec: 0.3, pan: k % 2 ? 0.4 : -0.4, delay: 0.08 });
+    }
+    // 51.5: the rise into the final card (music part: a bell and the pad swell above)
+    glock(51.5, hz('F#6'), 0.06, { dec: 1.0, delay: 0.15 });
+    // 52–55: the final phrase, IV–ii–V7, the lift's pluck returns with a glock an octave up
+    kick(52.0, 0.5, 'full');
+    kick(53.0, 0.34, 'felt');
+    kick(54.0, 0.34, 'felt');
+    crash(52.0, 0.07, { dec: 2.0, pan: 0.2 });
+    for (let k = 0; k < 5; k++) hat(52.25 + k * 0.5, 0.055);
+    const mel = [[52.0, 'C#6'], [52.5, 'B5'], [52.75, 'C#6'], [53.0, 'E6'], [53.5, 'F#6'], [53.75, 'E6'], [54.0, 'E6'], [54.5, 'D#6']];
+    for (const [t, n] of mel) {
+      pluck(t, n, 0.13, { dec: 0.9, room: 0.15, delay: 0.1 });
+      glock(t, hz(n) * 2, 0.04, { dec: 1.0 });
+    }
+    // 55.0: the cadence on E, then a calm sustained chord fading out by 59.8
+    pad(55.0, 57.6, CH.Efinal, 0.22, { att: 0.015, rel: 2.2, cut0: 2000, cut1: 1200, width: 0.8, hall: 0.25 });
+    sub(55.0, 57.4, 'E2', 0.45, { att: 0.01, rel: 2.3 });
+    kick(55.0, 0.6, 'full');
+    E.duck(55.0, 0.35);
+    crash(55.0, 0.09, { dec: 3.5, pan: -0.15 });
+    gong(55.0, hz('E3'), 0.07, { dec: 4.2 });
+    pluck(55.0, 'E6', 0.13, { dec: 1.6, room: 0.15, delay: 0.1 });
+    [['E6', 0], ['G#6', 0.25], ['B6', 0.5], ['E7', 0.75]].forEach(([n, dt]) => glock(55.0 + dt, hz(n), 0.07 - dt * 0.03, { dec: 2.6, delay: 0.12 }));
+  }
+
+  // ---- every sound effect (routed to sfx; air beds to amb)
+  function effects(E, I) {
+    const { nz, tock, plip, glass, fmBell, bleep, subDrop } = I;
+    // 0.0 air in: a short high airy swell
+    nz(0.0, 0.62, {
+      type: 'highpass',
+      q: 0.7,
+      f: [[0, 7500], [0.3, 3200, 'exp'], [0.62, 4500, 'exp']],
+      amp: [[0, 0], [0.006, 0.04], [0.3, 0.16, 'exp'], [0.62, FLOOR, 'exp']],
+      stereo: true,
+      sustain: true,
+      bus: 'amb',
+      hall: 0.25,
+      key: 'airin',
+    });
+    // 0.5–1.75: «Добавь поиск по обращениям», 26 keys, spaces at 6, 12, 15
+    {
+      const r = E.rng('typing', 1);
+      const hits = [];
+      for (let i = 0; i < 26; i++) {
+        const space = i === 6 || i === 12 || i === 15;
+        const dt = i === 0 ? 0 : i === 25 ? 1.25 : i * 0.05 + (r() - 0.5) * 0.024;
+        hits.push([dt, space ? 0.95 : 0.6 + 0.3 * r(), (r() - 0.5) * 0.4, space]);
+      }
+      typing(E, I, 0.5, hits, 0.5, 'type-prompt');
+    }
+    // 2.0 send: a crisp enter
+    typing(E, I, 2.0, [[0, 1, 0.1, true]], 0.6, 'type-send');
+    tock(2.0, 0.2, 3000, { pan: 0.1, dec: 0.03 });
+    // 2.25 / 2.5 / 2.75 code cards: soft blips, stepping up
+    [[2.25, 988], [2.5, 1109], [2.75, 1319]].forEach(([t, f]) => plip(t, f * 0.92, f, 0.08));
+    // 3.0 search bar slides in
+    whoosh(I, 3.0, 0.45, [[0, 900], [0.25, 4800, 'exp'], [0.45, 2600, 'exp']], 0.12, { pan: [[0, 0.5], [0.45, -0.1, 'lin']] });
+    // 3.25–3.625 «вход»
+    typing(E, I, 3.25, [0, 0.125, 0.25, 0.375].map((dt, i) => [dt, 0.7 + 0.1 * (i % 2), 0.05 * i - 0.05, false]), 0.45, 'type-vhod');
+    // 4.0 found: a bright two-note chime
+    fmBell(4.0, hz('G#6'), 0.09, { ratio: 2, index: 1.1, dec: 0.9, pan: -0.15, room: 0.2 });
+    fmBell(4.125, hz('B6'), 0.09, { ratio: 2, index: 1.1, dec: 1.1, pan: 0.15, room: 0.2 });
+    // 6.5 pull-back: long air whoosh with a falling filter
+    whoosh(I, 6.5, 2.1, [[0, 6000], [0.4, 2500, 'exp'], [2.1, 300, 'exp']], 0.16, { front: 1.2, peak: 0.12, q: 0.6, hall: 0.2 });
+    // 7.0 / 7.5 / 8.0 the cards wire up: low clicks
+    [[7.0, -0.3], [7.5, 0], [8.0, 0.3]].forEach(([t, pan]) => tock(t, 0.2, 520, { dec: 0.05, pan, room: 0.1 }));
+    // 8.5 the badge turns into «?»
+    question(E, 8.5, 0.12);
+    // 10.0 zoom-through
+    whoosh(I, 10.0, 0.5, [[0, 500], [0.35, 5000, 'exp'], [0.5, 3000, 'exp']], 0.12, { front: 0.5, peak: 0.3 });
+    // 10.75 pointer glide: soft tick
+    tock(10.75, 0.1, 3200, { dec: 0.02, pan: -0.2 });
+    // 11.5 «удалить папку»: tense blip, a semitone rub
+    bleep(11.5, hz('D6'), 0.1);
+    bleep(11.5, hz('D#6'), 0.08);
+    // 12.5 stop-frame: near-silence and one muffled beep
+    mbeep(E, 12.5, 880, 0.15, 0.2);
+    // 15.0 tree → schema
+    whoosh(I, 15.0, 0.9, [[0, 3500], [0.9, 600, 'exp']], 0.1, { front: 0.8, peak: 0.1 });
+    // 15.5 / 15.75 / 16.0 nodes appear
+    [[15.5, 1800], [15.75, 2100], [16.0, 2400]].forEach(([t, f], i) => tock(t, 0.15, f, { dec: 0.03, pan: -0.3 + 0.3 * i }));
+    // 16.0–17.5 uncontrolled arrows: glitchy zips on irregular 16ths
+    {
+      const r = E.rng('zips');
+      for (let k = 0; k < 12; k++) {
+        const keep = r() < 0.72;
+        const up = r() < 0.5;
+        const len = 0.045 + r() * 0.07;
+        const fa = 500 + r() * 1500;
+        const fb = 2500 + r() * 4000;
+        const pan = (r() * 2 - 1) * 0.75;
+        const rate = 40 + r() * 110;
+        const vel = 0.05 + r() * 0.035;
+        if (k === 0 || keep) zip(E, 16 + k * 0.125, len, up ? fa : fb, up ? fb : fa, vel, pan, rate);
+      }
+    }
+    // 17.5 stop: the button, a tape-stop of the A minor colour, a sub drop; then silence to 18.5
+    typing(E, I, 17.5, [[0, 1, 0, true]], 0.5, 'type-stop');
+    tapeStop(E, 17.5, 0.5, ['A2', 'E3', 'A3', 'C4'], 0.2);
+    subDrop(17.5, 90, 30, 0.45, 0.3);
+    // 21.0 the agent node becomes «модель»
+    tock(21.0, 0.12, 1500, { dec: 0.04 });
+    // 21.5 / 22.5 / 23.5 / 24.5 layers: quiet clicks, rising
+    [[21.5, 1600], [22.5, 1900], [23.5, 2250], [24.5, 2700]].forEach(([t, f]) => tock(t, 0.1, f, { dec: 0.03 }));
+    // 25.0 routes lock: a click and a smooth sweep to 26.0
+    tock(25.0, 0.13, 2000, { dec: 0.03 });
+    nz(25.0, 1.1, {
+      type: 'bandpass',
+      q: 0.9,
+      f: [[0, 500], [0.6, 3500, 'exp'], [1.1, 2000, 'exp']],
+      amp: [[0, 0], [0.25, 0.05, 'lin'], [0.6, 0.07, 'lin'], [1.1, FLOOR, 'exp']],
+      stereo: true,
+      sustain: true,
+      panEnv: [[0, -0.5], [1.1, 0.5, 'lin']],
+      bus: 'amb',
+      hall: 0.2,
+      key: 'sweep25',
+    });
+    // 27.0 rules screen: soft whoosh
+    whoosh(I, 27.0, 0.6, [[0, 1200], [0.3, 3500, 'exp'], [0.6, 1800, 'exp']], 0.07, { front: 0.4, peak: 0.25 });
+    // 28.0 / 29.0 rows pass: warm clicks, a major third apart
+    tock(28.0, 0.15, hz('E6'), { dec: 0.06 });
+    tock(29.0, 0.15, hz('G#6'), { dec: 0.06 });
+    // 30.5 «удалять» blocks: a dull stop
+    thud(E, 30.5, 0.45);
+    // 31.0 confirmation request: soft two-tone notification
+    glass(31.0, hz('B5'), 0.07, { dec: 0.6, att: 0.004 });
+    glass(31.125, hz('E6'), 0.07, { dec: 0.9, att: 0.004 });
+    // 33.5 / 34.5 / 35.25 / 35.75 steps light
+    [[33.5, 'E6'], [34.5, 'F#6'], [35.25, 'G#6'], [35.75, 'B6']].forEach(([t, n]) => {
+      tock(t, 0.12, 2600, { dec: 0.02 });
+      bleep(t, hz(n), 0.04);
+    });
+    // 36.0 the app slides in from the right
+    whoosh(I, 36.0, 0.5, [[0, 1000], [0.3, 4500, 'exp'], [0.5, 2500, 'exp']], 0.1, { pan: [[0, 0.7], [0.5, 0, 'lin']] });
+    // 36.5–37.0 «оплат»
+    typing(E, I, 36.5, [0, 0.125, 0.25, 0.375, 0.5].map((dt, i) => [dt, 0.65 + 0.1 * (i % 2), 0.04 * i - 0.08, false]), 0.42, 'type-oplat');
+    // 39.5–41.0 pull-back from the schema: airy whoosh
+    whoosh(I, 39.5, 1.5, [[0, 2500], [0.8, 5000, 'exp'], [1.5, 1500, 'exp']], 0.07, { front: 0.5, peak: 0.7, q: 0.6, bus: 'amb' });
+    // 41.0 the lesson card lands: soft impact with a shimmer
+    thud(E, 41.0, 0.4, { f0: 90, f1: 45, dec: 0.5, lp: 700 });
+    shimmer(E, I, 41.0, 1.3, 'land', { rate: 26, amp: 0.05, fade: true });
+    // 45.0 card «Готовый агент»
+    tock(45.0, 0.15, 2200, { dec: 0.03 });
+    // 46.5 card switch: swoosh
+    whoosh(I, 46.5, 0.45, [[0, 1200], [0.25, 5000, 'exp'], [0.45, 3000, 'exp']], 0.1, { pan: [[0, -0.6], [0.45, 0.6, 'lin']] });
+    // 47.0 / 47.5 / 48.0 blocks: technical clicks
+    [[47.0, 2600], [47.5, 2900], [48.0, 3300]].forEach(([t, f]) => {
+      tock(t, 0.14, f, { dec: 0.02 });
+      nz(t, 0.02, { type: 'highpass', q: 0.7, f: [[0, 6000]], amp: perc(0.12, 0.0005, 0.008), key: 'tc' });
+    });
+    // 48.5 the source folder slides in
+    tock(48.5, 0.06, 1400, { dec: 0.03 });
+    whoosh(I, 48.5, 0.5, [[0, 800], [0.5, 1700, 'exp']], 0.06, { front: 0.6, peak: 0.2, q: 1.2 });
+    // 49.0 / 49.5 / 50.0 snaps into one loop
+    [49.0, 49.5, 50.0].forEach((t, i) => {
+      tock(t, 0.18, 3500, { dec: 0.015, pan: (i - 1) * 0.3 });
+      plip(t, 2400, 1600, 0.05);
+    });
+    // 50.0–51.5 a circulating shimmer
+    shimmer(E, I, 50.0, 1.5, 'loop', { rate: 34, amp: 0.035, circle: 0.75 });
+    // 51.5 the smooth rise into the final card
+    tock(51.5, 0.08, 3000, { dec: 0.02 });
+    nz(51.5, 0.75, {
+      type: 'bandpass',
+      q: 0.8,
+      f: [[0, 900], [0.5, 6000, 'exp'], [0.75, 4000, 'exp']],
+      amp: [[0, 0], [0.01, 0.02], [0.5, 0.1, 'exp'], [0.75, FLOOR, 'exp']],
+      stereo: true,
+      sustain: true,
+      bus: 'sfx',
+      hall: 0.25,
+      key: 'rise',
+    });
+    // 53.5 the arrow draws to the sticker zone: soft rising blip
+    plip(53.5, 1100, 1650, 0.09);
+  }
+
+  function score(E, I) {
+    setupGates(E);
+    via(E, MUSIC_MAP, () => {
+      via(E, gateMap('lift'), () => lift(E, I));
+      via(E, gateMap('risk'), () => risk(E, I));
+      via(E, gateMap('creep'), () => creep(E, I));
+      system(E, I);
+      lessonMusic(E, I);
+      via(E, SFX_MAP, () => effects(E, I));
+    });
   }
 
   FILM.audio = {
