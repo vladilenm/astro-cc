@@ -37,7 +37,7 @@
     // Section fader rides in dB at global times, pre-compressor. The whole piece is a bed under a
     // voice-over, so it sits well below a solo mix; the rides only shape the acts and fade the final
     // chord to silence by 59.8 (the seam then meets the opening air swell from silence).
-    ride: [[0, -6]],
+    ride: [[0, -7], [6.45, -7], [6.5, -6], [37.0, -6], [37.5, -5], [44.5, -5], [46.0, -6], [56.5, -6], [58.0, -12], [59.2, -26], [59.8, -70]],
   };
 
   // ---------------------------------------------------------------- pitch
@@ -1331,7 +1331,7 @@
     lE: ['E3', 'B3', 'F#4', 'G#4'],
     lCsm: ['E3', 'B3', 'C#4', 'G#4'],
     lA: ['E3', 'A3', 'B3', 'C#4'],
-    lB: ['F#3', 'B3', 'D#4', 'E4'],
+    lB: ['F#3', 'B3', 'E4', 'F#4'],
     lE2: ['E3', 'B3', 'E4', 'G#4'],
     // act 2 risk, over the A1 drone
     Am: ['E3', 'A3', 'C4'],
@@ -1672,19 +1672,19 @@
     const T1 = 12.5;
     // slow low pulse: half notes, beats from 10.0, 8ths from 11.5
     const pulses = [6.5, 7.5, 8.5, 9.5, 10, 10.5, 11, 11.5, 11.75, 12, 12.25];
-    pulses.forEach((t) => kick(t, t === T0 ? 0.62 : 0.36 + (0.14 * (t - T0)) / 6, 'heart'));
-    subDrop(T0, 110, 55, 1.2, 0.3);
-    const v = 0.5;
-    const amp = [[0, 0], [0.02, v]];
+    pulses.forEach((t) => kick(t, t === T0 ? 0.3 : 0.26 + (0.14 * (t - T0)) / 6, 'heart'));
+    subDrop(T0, 110, 55, 1.2, 0.1);
+    const v = 0.32;
+    const amp = [[0, 0], [0.02, v * 0.35], [0.4, v, 'lin']];
     for (const t of pulses) {
       const dt = t - T0;
       if (dt > 0) amp.push([dt, v * 0.7, 'lin'], [dt + 0.05, v, 'lin']);
     }
     amp.push([T1 - T0 - 0.006, v, 'lin'], [T1 - T0, 0, 'lin']);
     drone(E, T0, T1, 'A1', { amp, lp: [[0, 230], [4.0, 260, 'exp'], [5.0, 380, 'exp'], [6.0, 520, 'exp']] });
-    // dark A minor pad, and a thin high A–Bb rub that swells from the question into the stop-frame
+    // dark A minor pad, and a thin high Bb–A major seventh that swells from the question into the stop-frame
     pad(T0, T1 - 0.008, CH.Am, 0.1, { att: 0.03, rel: 0.008, cut0: 500, cut1: 900, width: 0.6 });
-    pad(8.5, T1 - 0.008, ['A6', 'Bb6'], 0.035, { sine: true, att: 3.9, rel: 0.008, cut0: 6000, width: 0.7 });
+    pad(8.5, T1 - 0.008, ['Bb5', 'A6'], 0.035, { sine: true, att: 3.9, rel: 0.008, cut0: 6000, width: 0.7 });
     // ticking from 10.0, 8ths, growing
     for (let k = 0; k < 10; k++) {
       const t = 10 + k * 0.25;
@@ -1698,17 +1698,17 @@
     const T0 = 13.0;
     const T1 = 17.5;
     const pulses = [14.5, 15.5, 16, 16.5, 17, 17.25];
-    pulses.forEach((t) => kick(t, 0.3 + 0.05 * (t - 14.5), 'heart'));
-    const amp = [[0, 0], [1.8, 0.3, 'lin']];
+    pulses.forEach((t) => kick(t, 0.24 + 0.05 * (t - 14.5), 'heart'));
+    const amp = [[0, 0], [1.8, 0.2, 'lin']];
     for (const t of pulses) {
       const dt = t - T0;
-      const lv = 0.3 + 0.08 * (t - 14.5);
+      const lv = 0.2 + 0.06 * (t - 14.5);
       amp.push([dt, lv * 0.72, 'lin'], [dt + 0.05, lv, 'lin']);
     }
-    amp.push([T1 - T0 - 0.006, 0.55, 'lin'], [T1 - T0, 0, 'lin']);
+    amp.push([T1 - T0 - 0.006, 0.38, 'lin'], [T1 - T0, 0, 'lin']);
     drone(E, T0, T1, 'A1', { amp, lp: [[0, 200], [2.5, 260, 'exp'], [4.5, 480, 'exp']] });
     pad(T0, T1 - 0.008, CH.Am, 0.09, { att: 2.0, rel: 0.008, cut0: 420, cut1: 1000, width: 0.6 });
-    pad(15.5, T1 - 0.008, ['A6', 'Bb6'], 0.03, { sine: true, att: 2.0, rel: 0.008, cut0: 6000, width: 0.8 });
+    pad(15.5, T1 - 0.008, ['Bb5', 'A6'], 0.03, { sine: true, att: 2.0, rel: 0.008, cut0: 6000, width: 0.8 });
   }
 
   // ---- act 3: «инженерия» (18.5–39)
@@ -1728,7 +1728,7 @@
     drone(E, 37.5, 40.0, 'E2', { amp: [[0, 0], [0.02, 0.36, 'lin'], [2.5, 0, 'lin']], lp: [[0, 420], [2.5, 140, 'exp']] });
     // 21.0–25: an open fifth, and one high ping per layer, rising (the third is withheld)
     pad(21.0, 25.0, CH.A5, 0.09, { sine: true, att: 2.5, rel: 0.5, cut0: 1200, width: 0.4 });
-    [[21.5, 'E6'], [22.5, 'A6'], [23.5, 'B6'], [24.5, 'E7']].forEach(([t, n], i) => glass(t, hz(n), 0.05, { dec: 1.8, hall: 0.25, pan: -0.3 + i * 0.2 }));
+    [[21.5, 'E6'], [22.5, 'A6'], [23.5, 'B6'], [24.5, 'E7']].forEach(([t, n], i) => glass(t, hz(n), 0.065, { dec: 1.8, hall: 0.25, pan: -0.3 + i * 0.2 }));
     // 25.0: the third arrives, a warm Amaj9 pad (orange: allowed)
     const warm = [[25, 29, CH.Amaj9], [29, 31, CH.Fsm9], [31, 33, CH.Amaj9s11], [33, 35, CH.B11], [35, 36.5, CH.B7sus], [36.5, 37.5, CH.B7]];
     for (const [a, b, notes] of warm) {
@@ -1806,7 +1806,7 @@
         shaker(t + 0.375, 0.045);
       }
     }
-    crash(39.0, 0.09, { dec: 2.5, pan: -0.2 });
+    crash(39.0, 0.06, { dec: 1.6, pan: -0.2 });
     // bells: dotted-quarter figures on chord tones, high, into the ping-pong delay
     const bells = [
       [39, ['B6', 'G#6', 'E6']],
@@ -1816,9 +1816,9 @@
       [47, ['E7', 'C#7', 'G#6']],
       [49, ['E7', 'C#7', 'A6']],
     ];
-    for (const [a, ns] of bells) ns.forEach((n, i) => glock(a + i * 0.75, hz(n), 0.07, { dec: 1.4, delay: 0.2, pan: i % 2 ? 0.35 : -0.35 }));
+    for (const [a, ns] of bells) ns.forEach((n, i) => glock(a + i * 0.75, hz(n), 0.09, { dec: 1.4, delay: 0.2, pan: i % 2 ? 0.35 : -0.35 }));
     // 47–51.5: assembly, a light high pluck on 8ths
-    const asm = { 47: ['C#6', 'G#6', 'E6', 'B6'], 48: ['C#6', 'G#6', 'E6', 'B6'], 49: ['A5', 'E6', 'C#6', 'B6'], 50: ['A5', 'E6', 'C#6', 'B6'], 51: ['B5', 'F#6', 'E6', 'B6'] };
+    const asm = { 47: ['E6', 'B6', 'G#6', 'C#7'], 48: ['E6', 'B6', 'G#6', 'C#7'], 49: ['E6', 'C#7', 'A6', 'B6'], 50: ['E6', 'C#7', 'A6', 'B6'], 51: ['F#6', 'B6', 'E6', 'D#7'] };
     for (let k = 0; 47 + k * 0.25 < 51.5 - 1e-9; k++) {
       const t = 47 + k * 0.25;
       pluck(t, asm[Math.floor(t)][k % 4], 0.05 + 0.02 * (k / 18), { dec: 0.3, pan: k % 2 ? 0.4 : -0.4, delay: 0.08 });
@@ -1877,29 +1877,29 @@
     typing(E, I, 2.0, [[0, 1, 0.1, true]], 0.6, 'type-send');
     tock(2.0, 0.2, 3000, { pan: 0.1, dec: 0.03 });
     // 2.25 / 2.5 / 2.75 code cards: soft blips, stepping up
-    [[2.25, 988], [2.5, 1109], [2.75, 1319]].forEach(([t, f]) => plip(t, f * 0.92, f, 0.08));
+    [[2.25, 988], [2.5, 1109], [2.75, 1319]].forEach(([t, f]) => plip(t, f * 0.92, f, 0.13));
     // 3.0 search bar slides in
-    whoosh(I, 3.0, 0.45, [[0, 900], [0.25, 4800, 'exp'], [0.45, 2600, 'exp']], 0.12, { pan: [[0, 0.5], [0.45, -0.1, 'lin']] });
+    whoosh(I, 3.0, 0.45, [[0, 900], [0.25, 4800, 'exp'], [0.45, 2600, 'exp']], 0.16, { pan: [[0, 0.5], [0.45, -0.1, 'lin']] });
     // 3.25–3.625 «вход»
     typing(E, I, 3.25, [0, 0.125, 0.25, 0.375].map((dt, i) => [dt, 0.7 + 0.1 * (i % 2), 0.05 * i - 0.05, false]), 0.45, 'type-vhod');
     // 4.0 found: a bright two-note chime
-    fmBell(4.0, hz('G#6'), 0.09, { ratio: 2, index: 1.1, dec: 0.9, pan: -0.15, room: 0.2 });
-    fmBell(4.125, hz('B6'), 0.09, { ratio: 2, index: 1.1, dec: 1.1, pan: 0.15, room: 0.2 });
+    fmBell(4.0, hz('G#6'), 0.14, { ratio: 2, index: 1.1, dec: 0.9, pan: -0.15, room: 0.2 });
+    fmBell(4.125, hz('B6'), 0.14, { ratio: 2, index: 1.1, dec: 1.1, pan: 0.15, room: 0.2 });
     // 6.5 pull-back: long air whoosh with a falling filter
-    whoosh(I, 6.5, 2.1, [[0, 6000], [0.4, 2500, 'exp'], [2.1, 300, 'exp']], 0.16, { front: 1.2, peak: 0.12, q: 0.6, hall: 0.2 });
+    whoosh(I, 6.5, 2.1, [[0, 6000], [0.4, 2500, 'exp'], [2.1, 300, 'exp']], 0.13, { front: 0.9, peak: 0.12, q: 0.6, hall: 0.2 });
     // 7.0 / 7.5 / 8.0 the cards wire up: low clicks
     [[7.0, -0.3], [7.5, 0], [8.0, 0.3]].forEach(([t, pan]) => tock(t, 0.2, 520, { dec: 0.05, pan, room: 0.1 }));
     // 8.5 the badge turns into «?»
     question(E, 8.5, 0.12);
     // 10.0 zoom-through
-    whoosh(I, 10.0, 0.5, [[0, 500], [0.35, 5000, 'exp'], [0.5, 3000, 'exp']], 0.12, { front: 0.5, peak: 0.3 });
+    whoosh(I, 10.0, 0.5, [[0, 500], [0.35, 5000, 'exp'], [0.5, 3000, 'exp']], 0.15, { front: 0.5, peak: 0.3 });
     // 10.75 pointer glide: soft tick
     tock(10.75, 0.1, 3200, { dec: 0.02, pan: -0.2 });
     // 11.5 «удалить папку»: tense blip, a semitone rub
     bleep(11.5, hz('D6'), 0.1);
     bleep(11.5, hz('D#6'), 0.08);
     // 12.5 stop-frame: near-silence and one muffled beep
-    mbeep(E, 12.5, 880, 0.15, 0.2);
+    mbeep(E, 12.5, 880, 0.15, 0.09);
     // 15.0 tree → schema
     whoosh(I, 15.0, 0.9, [[0, 3500], [0.9, 600, 'exp']], 0.1, { front: 0.8, peak: 0.1 });
     // 15.5 / 15.75 / 16.0 nodes appear
@@ -1915,7 +1915,7 @@
         const fb = 2500 + r() * 4000;
         const pan = (r() * 2 - 1) * 0.75;
         const rate = 40 + r() * 110;
-        const vel = 0.05 + r() * 0.035;
+        const vel = 0.07 + r() * 0.05;
         if (k === 0 || keep) zip(E, 16 + k * 0.125, len, up ? fa : fb, up ? fb : fa, vel, pan, rate);
       }
     }
@@ -1942,33 +1942,33 @@
       key: 'sweep25',
     });
     // 27.0 rules screen: soft whoosh
-    whoosh(I, 27.0, 0.6, [[0, 1200], [0.3, 3500, 'exp'], [0.6, 1800, 'exp']], 0.07, { front: 0.4, peak: 0.25 });
+    whoosh(I, 27.0, 0.6, [[0, 1200], [0.3, 3500, 'exp'], [0.6, 1800, 'exp']], 0.09, { front: 0.4, peak: 0.25 });
     // 28.0 / 29.0 rows pass: warm clicks, a major third apart
     tock(28.0, 0.15, hz('E6'), { dec: 0.06 });
     tock(29.0, 0.15, hz('G#6'), { dec: 0.06 });
     // 30.5 «удалять» blocks: a dull stop
     thud(E, 30.5, 0.45);
     // 31.0 confirmation request: soft two-tone notification
-    glass(31.0, hz('B5'), 0.07, { dec: 0.6, att: 0.004 });
-    glass(31.125, hz('E6'), 0.07, { dec: 0.9, att: 0.004 });
+    glass(31.0, hz('B5'), 0.1, { dec: 0.6, att: 0.004 });
+    glass(31.125, hz('E6'), 0.1, { dec: 0.9, att: 0.004 });
     // 33.5 / 34.5 / 35.25 / 35.75 steps light
     [[33.5, 'E6'], [34.5, 'F#6'], [35.25, 'G#6'], [35.75, 'B6']].forEach(([t, n]) => {
       tock(t, 0.12, 2600, { dec: 0.02 });
       bleep(t, hz(n), 0.04);
     });
     // 36.0 the app slides in from the right
-    whoosh(I, 36.0, 0.5, [[0, 1000], [0.3, 4500, 'exp'], [0.5, 2500, 'exp']], 0.1, { pan: [[0, 0.7], [0.5, 0, 'lin']] });
+    whoosh(I, 36.0, 0.5, [[0, 1000], [0.3, 4500, 'exp'], [0.5, 2500, 'exp']], 0.13, { pan: [[0, 0.7], [0.5, 0, 'lin']] });
     // 36.5–37.0 «оплат»
     typing(E, I, 36.5, [0, 0.125, 0.25, 0.375, 0.5].map((dt, i) => [dt, 0.65 + 0.1 * (i % 2), 0.04 * i - 0.08, false]), 0.42, 'type-oplat');
     // 39.5–41.0 pull-back from the schema: airy whoosh
-    whoosh(I, 39.5, 1.5, [[0, 2500], [0.8, 5000, 'exp'], [1.5, 1500, 'exp']], 0.07, { front: 0.5, peak: 0.7, q: 0.6, bus: 'amb' });
+    whoosh(I, 39.5, 1.5, [[0, 3500], [0.8, 5000, 'exp'], [1.5, 1500, 'exp']], 0.08, { att: 0.004, front: 1.5, peak: 0.7, q: 0.6, bus: 'amb' });
     // 41.0 the lesson card lands: soft impact with a shimmer
     thud(E, 41.0, 0.4, { f0: 90, f1: 45, dec: 0.5, lp: 700 });
     shimmer(E, I, 41.0, 1.3, 'land', { rate: 26, amp: 0.05, fade: true });
     // 45.0 card «Готовый агент»
     tock(45.0, 0.15, 2200, { dec: 0.03 });
     // 46.5 card switch: swoosh
-    whoosh(I, 46.5, 0.45, [[0, 1200], [0.25, 5000, 'exp'], [0.45, 3000, 'exp']], 0.1, { pan: [[0, -0.6], [0.45, 0.6, 'lin']] });
+    whoosh(I, 46.5, 0.45, [[0, 1200], [0.25, 5000, 'exp'], [0.45, 3000, 'exp']], 0.13, { pan: [[0, -0.6], [0.45, 0.6, 'lin']] });
     // 47.0 / 47.5 / 48.0 blocks: technical clicks
     [[47.0, 2600], [47.5, 2900], [48.0, 3300]].forEach(([t, f]) => {
       tock(t, 0.14, f, { dec: 0.02 });
@@ -1998,7 +1998,7 @@
       key: 'rise',
     });
     // 53.5 the arrow draws to the sticker zone: soft rising blip
-    plip(53.5, 1100, 1650, 0.09);
+    plip(53.5, 1100, 1650, 0.13);
   }
 
   function score(E, I) {

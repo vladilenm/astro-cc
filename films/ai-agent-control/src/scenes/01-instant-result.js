@@ -20,7 +20,7 @@
   const ID = 'instant-result';
   const FR = 1 / 24;
 
-  // ===== shared H1 block — identical in 01-instant-result.js and 02-price-of-done.js =====
+  // ===== shared H1 block — identical in 01-instant-result.js, 02-price-of-done.js, 03-one-wrong-step.js =====
   /** H1 (storyboard handoff, T 5.0): the app's final state; the caret blinks on the global clock. */
   function h1AppState(T) {
     return { search: 1, query: 'вход', filter: 1, mark: 1, focus: 1, t: T };
@@ -38,7 +38,7 @@
   const CARDS = [
     { name: 'SearchBar.tsx', add: '+24', y: 800, t0: 2.75 },
     { name: 'TicketList.tsx', add: '+8', y: 890, t0: 2.5 },
-    { name: 'useSearch.ts', add: '+16', y: 980, t0: 2.25 },
+    { name: 'App.tsx', add: '+6', y: 980, t0: 2.25 },
   ];
 
   const B_IN = 0.5; // T 0.5  tag, headline, prompt card
@@ -159,8 +159,8 @@
   function overlay(ctx, L, t, T) {
     const ui = L.ui, P = L.pal;
     // T 3.0–3.25: the whole group flies into the search slot (scale 0.6, centre to y 802) and fades
-    const fe = ui.kf(t, B_FLY, 0.25, 'outCubic');
-    const ga = 1 - fe;
+    const fe = ui.kf(t, B_FLY, 0.25, 'inOutCubic');
+    const ga = 1 - L.smoothstep(0.25, 1, fe);
     if (ga <= 0.001) return;
     ctx.save();
     ctx.globalAlpha *= ga;
@@ -221,7 +221,7 @@
       ctx.restore();
 
       // 3 scrim while the request overlay is up
-      const sa = 0.5 * ui.kf(t, B_IN, 6 * FR) * (1 - ui.kf(t, B_FLY, 0.25));
+      const sa = 0.66 * ui.kf(t, B_IN, 6 * FR) * (1 - ui.kf(t, B_FLY, 0.25));
       if (sa > 0) {
         rrPath(ctx, ui, APP.x, APP.y, APP.w, APP.h, APP.r);
         ctx.fillStyle = L.rgba(P.bg, sa);
