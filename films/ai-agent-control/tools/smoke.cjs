@@ -1,0 +1,3 @@
+const {chromium}=require('playwright');
+(async()=>{const fs=require('fs');const ep=process.env.CHROMIUM_PATH||['/opt/pw-browsers/chromium-1194/chrome-linux/chrome'].find(p=>fs.existsSync(p));const b=await chromium.launch({executablePath:ep});const p=await b.newPage();await p.setContent('<canvas id=c></canvas>');
+console.log('ok',await p.evaluate(async()=>{const c=document.getElementById('c').getContext('2d');const o=new OfflineAudioContext(2,44100,44100);const osc=o.createOscillator();osc.connect(o.destination);osc.start();const buf=await o.startRendering();return [!!c,buf.length]}));await b.close()})();

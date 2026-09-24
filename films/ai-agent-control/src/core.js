@@ -1,0 +1,560 @@
+/*
+ * core.js : the FILM runtime.
+ *
+ * Load order everywhere: core.js, lib.js, timeline.js, scenes (sorted), music.js, player.js.
+ *
+ * Defines window.FILM: the scene registry, the timeline reader, renderFrame(T),
+ * transitions between shots and the global post-processing (boiling grain).
+ *
+ * Rules for scene code (see docs/CONTRACT.md):
+ *   - Draw only from (t, info). No state carried between frames.
+ *   - Use ctx.save()/ctx.restore(). Never call ctx.setTransform/resetTransform with
+ *     absolute values: the base transform carries the render scale (FILM.S).
+ *     If you really need the base transform back, call FILM.baseTransform(ctx).
+ *   - Randomness only from FILM.lib.rng(seed) / FILM.lib.hash(...).
+ *   - FILM.lib, FILM.lib.pal and FILM.lib.ease are frozen. Copy before changing anything.
+ */
+(function () {
+  'use strict';
+
+  const root = typeof window !== 'undefined' ? window : globalThis;
+  const FILM = (root.FILM = root.FILM || {});
+
+  FILM.W = 1080;
+  FILM.H = 1920;
+  FILM.FPS = 24;
+  FILM.BOIL_FPS = 12;
+  FILM.S = 1; // render scale: device pixels per logical pixel
+  FILM.registry = {}; // id -> scene definition
+  FILM.registered = []; // [{ id, file }] in registration order
+  FILM.errors = []; // drawing errors collected by renderFrame (tools clear and read this)
+  FILM.strict = false; // when true, renderFrame rethrows scene errors after recording them
+  FILM.only = null; // shot id when a tool loaded only that shot's file (snap --only); transitions from an unloaded shot are skipped
+  FILM.canvas = null;
+  FILM.ctx = null;
+
+  // Global time of the frame being drawn. Read-only for scenes (FILM.lib.T reads it); core sets it before each draw.
+  let frameT = 0;
+  Object.defineProperty(FILM, 'frameT', { get: () => frameT, enumerable: true, configurable: false });
+
+  const EPS = 1e-6;
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+  // Small self-contained hash so core never depends on lib being healthy.
+  function ihash(a, b, c) {
+    let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(c | 0, 0x9e3779b1);
+    h ^= h >>> 15;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scene registry
+  // ---------------------------------------------------------------------------
+
+  FILM.scene = function scene(def) {
+    const doc = typeof document !== 'undefined' ? document : null;
+    const src = doc && doc.currentScript && doc.currentScript.src ? doc.currentScript.src : '';
+    const file = src ? decodeURIComponent(src.split('?')[0].split('/').pop()) : '';
+    if (!def || typeof def.id !== 'string' || !def.id || typeof def.draw !== 'function') {
+      const msg = `FILM.scene() needs { id: string, draw: function }${file ? ' (in ' + file + ')' : ''}`;
+      FILM.errors.push({ T: null, shot: def && def.id, message: msg, file });
+      if (typeof console !== 'undefined') console.error(msg);
+      return def;
+    }
+    if (FILM.registry[def.id]) {
+      const prev = FILM.registry[def.id].__file || '?';
+      const msg = `duplicate scene id '${def.id}' registered by ${file || '?'} (already registered by ${prev})`;
+      FILM.errors.push({ T: null, shot: def.id, message: msg, file });
+      if (typeof console !== 'undefined') console.error(msg);
+    }
+    def.__file = file;
+    FILM.registry[def.id] = def;
+    FILM.registered.push({ id: def.id, file });
+    return def;
+  };
+
+  // ---------------------------------------------------------------------------
+  // Timeline
+  // ---------------------------------------------------------------------------
+
+  function modeOf(shot) {
+    const m = String((shot && shot.mode) || 'illustrated').toLowerCase();
+    if (m === 'none' || m === 'raw') return 'none';
+    if (m.indexOf('schem') >= 0 || m.indexOf('blue') >= 0) return 'schematic';
+    return 'illustrated';
+  }
+  FILM.modeOf = modeOf;
+
+  function normTransition(tr) {
+    if (!tr) return null;
+    if (typeof tr === 'string') tr = { kind: tr };
+    const kind = String(tr.kind || tr.type || 'cut').toLowerCase();
+    const dur = Number(tr.dur != null ? tr.dur : tr.duration != null ? tr.duration : 0.25);
+    return Object.assign({}, tr, { kind, dur: Math.max(0, dur) });
+  }
+
+  // Accepts start/end, start/dur, t0/t1, from/to; shots with only a dur chain after the previous one.
+  // Writes normalised start, end and dur back onto each shot entry.
+  let prepared = null;
+  function prepare() {
+    const tl = FILM.TIMELINE;
+    if (!tl) throw new Error('FILM.TIMELINE is not defined: src/timeline.js did not load');
+    const shots = tl.shots || [];
+    if (prepared && prepared.tl === tl && prepared.src === shots && prepared.n === shots.length) return prepared;
+    let cursor = 0;
+    const out = [];
+    for (let i = 0; i < shots.length; i++) {
+      const s = shots[i];
+      const pick = (...keys) => {
+        for (const k of keys) if (s[k] != null && isFinite(Number(s[k]))) return Number(s[k]);
+        return null;
+      };
+      let start = pick('start', 't0', 'from', 'in');
+      if (start == null) start = cursor;
+      let end = pick('end', 't1', 'to', 'out');
+      if (end == null) {
+        const d = pick('dur', 'duration', 'length');
+        end = d != null ? start + d : start;
+      }
+      s.start = start;
+      s.end = end;
+      s.dur = end - start;
+      s.index = i;
+      s.transitionIn = normTransition(s.transitionIn);
+      cursor = end;
+      out.push(s);
+    }
+    const duration = tl.duration != null ? Number(tl.duration) : out.length ? out[out.length - 1].end : 0;
+    prepared = { tl, src: shots, n: shots.length, shots: out, duration };
+    return prepared;
+  }
+  FILM.prepare = prepare;
+
+  Object.defineProperty(FILM, 'DURATION', {
+    get() { return FILM.TIMELINE ? prepare().duration : 0; },
+    enumerable: true,
+    configurable: true,
+  });
+  Object.defineProperty(FILM, 'FRAMES', {
+    get() { return Math.round(FILM.DURATION * FILM.FPS); },
+    enumerable: true,
+    configurable: true,
+  });
+  Object.defineProperty(FILM, 'shots', {
+    get() { return FILM.TIMELINE ? prepare().shots : []; },
+    enumerable: true,
+    configurable: true,
+  });
+
+  function shotIndexAt(T) {
+    const { shots } = prepare();
+    if (!shots.length) return -1;
+    for (let i = 0; i < shots.length; i++) {
+      if (T < shots[i].end - EPS) return i;
+    }
+    return shots.length - 1;
+  }
+  FILM.shotIndexAt = shotIndexAt;
+  FILM.activeShot = function activeShot(T) {
+    const i = shotIndexAt(T);
+    return i < 0 ? null : prepare().shots[i];
+  };
+  FILM.frameTime = (i) => i / FILM.FPS;
+  FILM.shotById = (id) => prepare().shots.find((s) => s.id === id) || null;
+
+  // ---------------------------------------------------------------------------
+  // Canvas
+  // ---------------------------------------------------------------------------
+
+  function makeCanvas(w, h) {
+    if (typeof document !== 'undefined') {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      return c;
+    }
+    return new OffscreenCanvas(w, h);
+  }
+  FILM.makeCanvas = makeCanvas;
+
+  let ctxAttrs = {};
+  FILM.mount = function mount(canvas, opts) {
+    opts = opts || {};
+    const S = opts.scale && opts.scale > 0 ? opts.scale : 1;
+    FILM.S = S;
+    canvas.width = Math.max(2, Math.round((FILM.W * S) / 2) * 2);
+    canvas.height = Math.max(2, Math.round((FILM.H * S) / 2) * 2);
+    ctxAttrs = { alpha: false };
+    if (opts.readback) ctxAttrs.willReadFrequently = true;
+    FILM.canvas = canvas;
+    FILM.ctx = canvas.getContext('2d', ctxAttrs);
+    layers.length = 0;
+    return FILM.ctx;
+  };
+
+  FILM.baseTransform = function baseTransform(ctx) {
+    const c = ctx.canvas;
+    ctx.setTransform(c.width / FILM.W, 0, 0, c.height / FILM.H, 0, 0);
+  };
+
+  const layers = [];
+  function layer(i) {
+    const w = FILM.canvas.width;
+    const h = FILM.canvas.height;
+    let L = layers[i];
+    if (!L || L.canvas.width !== w || L.canvas.height !== h) {
+      const canvas = makeCanvas(w, h);
+      L = layers[i] = { canvas, ctx: canvas.getContext('2d', ctxAttrs) };
+    }
+    return L;
+  }
+
+  // clear=true wipes the bitmap as well (ctx.reset where available).
+  // clear=false unwinds any save() a scene left open and restores default state, keeping pixels.
+  function resetCtx(ctx, clear) {
+    if (clear && typeof ctx.reset === 'function') {
+      ctx.reset();
+    } else {
+      for (let i = 0; i < 64; i++) ctx.restore();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.filter = 'none';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.shadowColor = 'rgba(0,0,0,0)';
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      ctx.miterLimit = 10;
+      ctx.fillStyle = '#000';
+      ctx.strokeStyle = '#000';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+      ctx.beginPath();
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Global post: boiling grain
+  // ---------------------------------------------------------------------------
+
+  const TILE = 512;
+  const VARIANTS = 4;
+  const grainCache = {};
+
+  function grainTile(mode, v) {
+    const key = mode + v;
+    if (grainCache[key]) return grainCache[key];
+    const c = makeCanvas(TILE, TILE);
+    const g = c.getContext('2d');
+    const img = g.createImageData(TILE, TILE);
+    const d = img.data;
+    const seed = (mode === 'schematic' ? 9001 : 4242) + v * 131;
+    for (let y = 0; y < TILE; y++) {
+      for (let x = 0; x < TILE; x++) {
+        const i = (y * TILE + x) * 4;
+        const n = ihash(x, y, seed);
+        // paper tooth: soft 2-3 px clumps from a wrapped coarse cell, plus a little per-pixel noise
+        const cx0 = (x >> 2) % (TILE >> 2), cy0 = (y >> 2) % (TILE >> 2);
+        const fx = ((x & 3) + 0.5) / 4, fy = ((y & 3) + 0.5) / 4;
+        const q = TILE >> 2;
+        const c00 = ihash(cx0, cy0, seed + 7), c10 = ihash((cx0 + 1) % q, cy0, seed + 7);
+        const c01 = ihash(cx0, (cy0 + 1) % q, seed + 7), c11 = ihash((cx0 + 1) % q, (cy0 + 1) % q, seed + 7);
+        const cn = (c00 * (1 - fx) + c10 * fx) * (1 - fy) + (c01 * (1 - fx) + c11 * fx) * fy;
+        // neutral film grain for the dark plates (art bible §4.3): faint light specks, soft dark clumps
+        const v2 = mode === 'schematic' ? n * 0.75 + cn * 0.25 : n * 0.6 + cn * 0.4;
+        if (v2 > 0.64) {
+          d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
+          d[i + 3] = Math.min(255, (v2 - 0.64) * 2.8 * (mode === 'schematic' ? 22 : 18));
+        } else if (v2 < 0.32) {
+          d[i] = 0; d[i + 1] = 0; d[i + 2] = 0;
+          d[i + 3] = (0.32 - v2) * 3.1 * 40;
+        }
+      }
+    }
+    g.putImageData(img, 0, 0);
+    grainCache[key] = c;
+    return c;
+  }
+
+  function postShot(ctx, shot, def, T) {
+    const mode = modeOf(shot);
+    if (mode === 'none') return;
+    if (FILM.post === false) return; // tools measure a bare frame; never set in the shipped player
+    let cfg = def && def.post !== undefined ? def.post : shot.post;
+    if (cfg === false) return;
+    let amount = 1;
+    if (typeof cfg === 'number') amount = cfg;
+    else if (cfg && typeof cfg === 'object' && cfg.grain != null) amount = Number(cfg.grain);
+    if (!(amount > 0)) return;
+    const b = Math.floor(T * FILM.BOIL_FPS + EPS);
+    const v = Math.floor(ihash(b, 17, 3) * VARIANTS);
+    const tile = grainTile(mode, v);
+    const ox = Math.floor(ihash(b, 29, 5) * TILE);
+    const oy = Math.floor(ihash(b, 31, 7) * TILE);
+    const c = ctx.canvas;
+    // the tile is authored in logical pixels: scale it with the render so previews keep the grain size
+    const S = c.width / FILM.W;
+    const pattern = ctx.createPattern(tile, 'repeat');
+    if (Math.abs(S - 1) > EPS && typeof pattern.setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
+      pattern.setTransform(new DOMMatrix([S, 0, 0, S, 0, 0]));
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = Math.min(1, amount);
+    ctx.fillStyle = pattern;
+    ctx.translate(-ox * S, -oy * S);
+    ctx.fillRect(0, 0, c.width + ox * S, c.height + oy * S);
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drawing
+  // ---------------------------------------------------------------------------
+
+  function drawCard(ctx, title, lines, bg) {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, FILM.W, FILM.H);
+    ctx.fillStyle = '#fff';
+    ctx.font = '600 44px ui-monospace, Menlo, monospace';
+    ctx.fillText(title, 60, 200);
+    ctx.font = '28px ui-monospace, Menlo, monospace';
+    let y = 270;
+    for (const line of lines) {
+      for (let k = 0; k < line.length; k += 56) {
+        ctx.fillText(line.slice(k, k + 56), 60, y);
+        y += 40;
+      }
+    }
+  }
+
+  function drawShot(ctx, shot, T, outgoing) {
+    resetCtx(ctx, true);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    const def = FILM.registry[shot.id];
+    let t = Math.max(0, T - shot.start);
+    if (outgoing) t = Math.min(t, shot.dur);
+    const info = {
+      dur: shot.dur,
+      p: shot.dur > 0 ? clamp01(t / shot.dur) : 0,
+      T,
+      frame: Math.floor(T * FILM.FPS + EPS),
+      W: FILM.W,
+      H: FILM.H,
+      S: FILM.S,
+      lib: FILM.lib,
+      shot,
+      mode: modeOf(shot),
+      outgoing: !!outgoing,
+    };
+    frameT = T;
+    FILM.baseTransform(ctx);
+    if (!def) {
+      const msg = `no scene registered for shot '${shot.id}' (expected in ${shot.file || 'src/scenes/?'})`;
+      FILM.errors.push({ T, shot: shot.id, message: msg, missing: true });
+      drawCard(ctx, 'missing scene', [shot.id, String(shot.file || '')], '#2a2a2a');
+    } else {
+      try {
+        ctx.save();
+        def.draw(ctx, t, info);
+      } catch (e) {
+        FILM.errors.push({ T, shot: shot.id, message: String((e && e.message) || e), stack: e && e.stack });
+        resetCtx(ctx, false);
+        FILM.baseTransform(ctx);
+        drawCard(ctx, 'scene error', [shot.id, String((e && e.message) || e)], '#5a1010');
+        if (FILM.strict) throw e;
+      }
+      resetCtx(ctx, false);
+    }
+    postShot(ctx, shot, def, T);
+  }
+
+  // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
+  function composite(ctx, A, B, tr, p) {
+    resetCtx(ctx, true);
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    ctx.drawImage(A, 0, 0);
+    switch (tr.kind) {
+      case 'fade':
+        ctx.globalAlpha = e;
+        ctx.drawImage(B, 0, 0);
+        break;
+      case 'iris': {
+        const S = w / FILM.W;
+        const cx = (tr.x != null ? tr.x : FILM.W / 2) * S;
+        const cy = (tr.y != null ? tr.y : FILM.H / 2) * S;
+        const R = Math.hypot(Math.max(cx, w - cx), Math.max(cy, h - cy));
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(0.001, e * R), 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(B, 0, 0);
+        break;
+      }
+      case 'wipe': {
+        const dir = tr.dir || 'down';
+        ctx.beginPath();
+        if (dir === 'up') ctx.rect(0, h * (1 - e), w, h * e);
+        else if (dir === 'left') ctx.rect(w * (1 - e), 0, w * e, h);
+        else if (dir === 'right') ctx.rect(0, 0, w * e, h);
+        else ctx.rect(0, 0, w, h * e);
+        ctx.clip();
+        ctx.drawImage(B, 0, 0);
+        break;
+      }
+      default:
+        ctx.drawImage(B, 0, 0);
+    }
+    resetCtx(ctx, false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Captions (art bible §6.3): the voice-over meaning as short burned-in lines, drawn over every
+  // shot from FILM.TIMELINE.captions. ?captions=0 (render --clean) leaves them out for a clean master.
+  // ---------------------------------------------------------------------------
+
+  FILM.CAPTIONS = !(typeof location !== 'undefined' && /[?&]captions=0\b/.test(location.search || ''));
+  const CAP_SANS = 'Inter, "SF Pro Display", "Helvetica Neue", Arial, sans-serif';
+
+  function drawCaptions(ctx, T) {
+    const tl = FILM.TIMELINE;
+    if (!FILM.CAPTIONS || !tl || !Array.isArray(tl.captions)) return;
+    let cap = null;
+    for (const c of tl.captions) if (T >= c[0] - EPS && T < c[1] - EPS) cap = c;
+    if (!cap) return;
+    const fin = 3 / FILM.FPS, fout = 3 / FILM.FPS;
+    const a = Math.min(clamp01((T - cap[0] + 1 / FILM.FPS) / fin), clamp01((cap[1] - T) / fout));
+    if (a <= 0) return;
+    resetCtx(ctx, false);
+    FILM.baseTransform(ctx);
+    ctx.save();
+    const size = 40;
+    ctx.font = `600 ${size}px ${CAP_SANS}`;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    // wrap to at most two lines of 880 px
+    const words = String(cap[2]).split(' ');
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const tryS = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(tryS).width > 880 && cur) {
+        lines.push(cur);
+        cur = w;
+      } else cur = tryS;
+    }
+    if (cur) lines.push(cur);
+    const lh = 54;
+    const bottom = 1528;
+    const padX = 28, padY = 16;
+    const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    const bw = widest + padX * 2, bh = lines.length * lh + padY * 2 - 8;
+    const bx = FILM.W / 2 - bw / 2, by = bottom - bh;
+    const rise = (1 - a) * 10;
+    ctx.globalAlpha = a;
+    ctx.beginPath();
+    const r = 18;
+    ctx.moveTo(bx + r, by + rise);
+    ctx.arcTo(bx + bw, by + rise, bx + bw, by + bh + rise, r);
+    ctx.arcTo(bx + bw, by + bh + rise, bx, by + bh + rise, r);
+    ctx.arcTo(bx, by + bh + rise, bx, by + rise, r);
+    ctx.arcTo(bx, by + rise, bx + bw, by + rise, r);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.74)';
+    ctx.fill();
+    ctx.fillStyle = '#F4F4F1';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], FILM.W / 2, by + padY + 38 + i * lh + rise);
+    ctx.restore();
+    resetCtx(ctx, false);
+  }
+  FILM.drawCaptions = drawCaptions;
+
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1 };
+  FILM.TRANSITION_KINDS = Object.keys(KINDS);
+
+  /** Draws global time T (seconds) to FILM.canvas, then the captions. Returns the active shot entry. */
+  FILM.renderFrame = function renderFrame(T) {
+    const shot = renderShots(T);
+    if (FILM.ctx) {
+      const P = prepare();
+      let Tc = Number(T) || 0;
+      if (Tc < 0) Tc = 0;
+      if (P.duration > 0 && Tc > P.duration) Tc = P.duration;
+      drawCaptions(FILM.ctx, Tc);
+    }
+    return shot;
+  };
+
+  function renderShots(T) {
+    const P = prepare();
+    if (!FILM.ctx) throw new Error('FILM.renderFrame: call FILM.mount(canvas) first');
+    T = Number(T) || 0;
+    if (T < 0) T = 0;
+    if (P.duration > 0 && T > P.duration) T = P.duration;
+    const idx = shotIndexAt(T);
+    const ctx = FILM.ctx;
+    if (idx < 0) {
+      resetCtx(ctx, true);
+      FILM.baseTransform(ctx);
+      drawCard(ctx, 'empty timeline', ['FILM.TIMELINE.shots is empty'], '#222');
+      return null;
+    }
+    const shot = P.shots[idx];
+    const tr = shot.transitionIn;
+    const inT = T - shot.start;
+    if (!(idx > 0 && tr && tr.kind !== 'cut' && tr.dur > 0 && inT < tr.dur - EPS)) {
+      drawShot(ctx, shot, T, false);
+      return shot;
+    }
+    if (!KINDS[tr.kind]) {
+      FILM.errors.push({ T, shot: shot.id, message: `unknown transition kind '${tr.kind}'` });
+      drawShot(ctx, shot, T, false);
+      return shot;
+    }
+    // Frames are sampled at their start, so frame k of an n-frame transition sits at inT = k / FPS.
+    const k = Math.max(0, inT * FILM.FPS);
+    const n = tr.dur * FILM.FPS;
+    if (tr.kind === 'flash') {
+      // The flash peaks on the cut frame (full colour over the incoming shot) and clears by the
+      // end of the transition, so a hit on the cut lands on the white frame.
+      drawShot(ctx, shot, T, false);
+      const q = clamp01(k / n);
+      resetCtx(ctx, false);
+      ctx.globalAlpha = (1 - q) * (1 - q);
+      ctx.fillStyle = tr.color || '#fff8ea';
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      resetCtx(ctx, false);
+      return shot;
+    }
+    const prev = P.shots[idx - 1];
+    if (FILM.only && !FILM.registry[prev.id]) {
+      // a tool loaded only this shot's file: the outgoing shot is not here, so show the incoming shot alone
+      drawShot(ctx, shot, T, false);
+      return shot;
+    }
+    // p runs strictly between the two shots: frame 0 is already 1/(n+1) of the way in, the last
+    // transition frame (n-1) is n/(n+1), so neither shot's own frame is repeated.
+    const A = layer(0);
+    const B = layer(1);
+    drawShot(A.ctx, prev, T, true);
+    drawShot(B.ctx, shot, T, false);
+    composite(ctx, A.canvas, B.canvas, tr, clamp01((k + 1) / (n + 1)));
+    return shot;
+  }
+})();

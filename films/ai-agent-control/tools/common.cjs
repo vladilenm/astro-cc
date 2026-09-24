@@ -1,0 +1,452 @@
+// common.cjs : shared plumbing for snap, build, render and check.
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const ROOT = path.resolve(__dirname, '..');
+const SLUG = path.basename(ROOT).trim().replace(/\s+/g, '-'); // the project folder is named for the film's slug
+const SRC = path.join(ROOT, 'src');
+const FIX = path.join(__dirname, 'fixtures');
+const TMP = path.join(ROOT, '.tmp');
+const FPS = 24;
+
+function die(msg) {
+  process.stderr.write(`\n[error] ${msg}\n`);
+  process.exit(2);
+}
+
+/** --key value, --key=value, --flag. Numbers stay strings; callers convert. */
+function parseArgs(argv, flags = []) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) {
+      out._.push(a);
+      continue;
+    }
+    const eq = a.indexOf('=');
+    if (eq > 0) {
+      out[a.slice(2, eq)] = a.slice(eq + 1);
+      continue;
+    }
+    const key = a.slice(2);
+    const next = argv[i + 1];
+    if (flags.includes(key) || next === undefined || next.startsWith('--')) out[key] = true;
+    else {
+      out[key] = next;
+      i++;
+    }
+  }
+  return out;
+}
+
+/** Resolve a user path: absolute stays, relative is taken from the project root. */
+function resolveOut(p) {
+  return path.isAbsolute(p) ? p : path.join(ROOT, p);
+}
+
+function rel(p) {
+  return path.relative(ROOT, p) || '.';
+}
+
+function normalizeTimeline(tl) {
+  if (!tl || typeof tl !== 'object') throw new Error('FILM.TIMELINE is not an object');
+  const shots = Array.isArray(tl.shots) ? tl.shots : [];
+  let cursor = 0;
+  const pick = (s, keys) => {
+    for (const k of keys) if (s[k] != null && isFinite(Number(s[k]))) return Number(s[k]);
+    return null;
+  };
+  const out = shots.map((s, i) => {
+    let start = pick(s, ['start', 't0', 'from', 'in']);
+    if (start == null) start = cursor;
+    let end = pick(s, ['end', 't1', 'to', 'out']);
+    if (end == null) {
+      const d = pick(s, ['dur', 'duration', 'length']);
+      end = d != null ? start + d : start;
+    }
+    cursor = end;
+    let tr = s.transitionIn || null;
+    if (typeof tr === 'string') tr = { kind: tr };
+    if (tr) {
+      tr = Object.assign({}, tr, {
+        kind: String(tr.kind || tr.type || 'cut').toLowerCase(),
+        dur: Number(tr.dur != null ? tr.dur : tr.duration != null ? tr.duration : 0.25),
+      });
+    }
+    return Object.assign({}, s, { index: i, start, end, dur: end - start, transitionIn: tr });
+  });
+  const duration = tl.duration != null ? Number(tl.duration) : out.length ? out[out.length - 1].end : 0;
+  return { raw: tl, shots: out, duration, hasDuration: tl.duration != null, bpm: tl.bpm, cues: tl.cues };
+}
+
+/** Evaluate a timeline file in a sandbox (no browser needed). */
+function loadTimeline(file) {
+  const code = fs.readFileSync(file, 'utf8');
+  const noop = () => {};
+  const libStub = new Proxy(function () {}, { get: () => libStub, apply: () => 0 });
+  const FILM = { W: 1080, H: 1920, FPS, lib: libStub, scene: noop };
+  const sandbox = { FILM, console, Math };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: file, timeout: 2000 });
+  const tl = sandbox.FILM.TIMELINE || (sandbox.window.FILM && sandbox.window.FILM.TIMELINE);
+  if (!tl) throw new Error(`${rel(file)} ran but did not set FILM.TIMELINE`);
+  return normalizeTimeline(tl);
+}
+
+/**
+ * Work out every file to load, in contract order, and validate that the timeline and each
+ * shot's file exist. Returns { files, timeline, base, sceneFiles, shotFile(id), musicFile, warnings }.
+ *   fixtures: use tools/fixtures/{timeline.js,scenes,music.js} instead of src (or --fixtures=<dir> with that layout)
+ *   only:     shot id; load only core, lib, timeline and that shot's file
+ *   player:   include player.js (default true)
+ *   needMusic: die when music.js is missing
+ *   lenient:  report missing shot files in .problems instead of exiting (check.cjs)
+ */
+function sources({ fixtures = false, only = null, player = true, needMusic = false, lenient = false } = {}) {
+  // fixtures may be true (tools/fixtures) or a directory path laid out the same way
+  const base = fixtures ? (typeof fixtures === 'string' ? resolveOut(fixtures) : FIX) : SRC;
+  const label = fixtures ? rel(base) : 'src';
+  const core = path.join(SRC, 'core.js');
+  const lib = path.join(SRC, 'lib.js');
+  for (const f of [core, lib]) if (!fs.existsSync(f)) die(`${rel(f)} is missing.`);
+  const tlFile = path.join(base, 'timeline.js');
+  if (!fs.existsSync(tlFile)) {
+    die(
+      `${label}/timeline.js is missing.\n` +
+        (fixtures
+          ? 'The fixture timeline should live at tools/fixtures/timeline.js.'
+          : 'The storyboard agent writes src/timeline.js. Until it exists, run with --fixtures to exercise the tools.')
+    );
+  }
+  let timeline;
+  try {
+    timeline = loadTimeline(tlFile);
+  } catch (e) {
+    die(`${label}/timeline.js failed to evaluate: ${e.message}`);
+  }
+  const scenesDir = path.join(base, 'scenes');
+  const sceneFiles = fs.existsSync(scenesDir)
+    ? fs.readdirSync(scenesDir).filter((f) => f.endsWith('.js')).sort().map((f) => path.join(scenesDir, f))
+    : [];
+  const shotFile = (shot) => {
+    if (!shot.file) return null;
+    return path.join(scenesDir, path.basename(String(shot.file)));
+  };
+  const problems = [];
+  for (const shot of timeline.shots) {
+    if (!shot.file) problems.push(`shot '${shot.id}' has no "file" in ${label}/timeline.js`);
+    else if (!fs.existsSync(shotFile(shot))) problems.push(`shot '${shot.id}' names file '${shot.file}', which does not exist at ${rel(shotFile(shot))}`);
+  }
+  const warnings = [];
+  let files;
+  if (only) {
+    const shot = timeline.shots.find((s) => s.id === only);
+    if (!shot) die(`--only: no shot with id '${only}' in ${label}/timeline.js. Ids: ${timeline.shots.map((s) => s.id).join(', ')}`);
+    const f = shotFile(shot);
+    if (!f || !fs.existsSync(f)) die(`shot '${only}': ${problems.find((p) => p.includes(`'${only}'`)) || 'file missing'}`);
+    files = [core, lib, tlFile, f];
+  } else {
+    if (problems.length && !lenient) die(`timeline problems:\n  - ${problems.join('\n  - ')}`);
+    files = [core, lib, tlFile, ...sceneFiles];
+    const musicFile = path.join(base, 'music.js');
+    if (fs.existsSync(musicFile)) files.push(musicFile);
+    else if (needMusic) die(`${label}/music.js is missing. The music agent writes it. Pass --silent to render without it.`);
+    else warnings.push(`${label}/music.js is missing (no audio)`);
+    if (player) files.push(path.join(SRC, 'player.js'));
+  }
+  const musicFile = path.join(base, 'music.js');
+  return {
+    files,
+    timeline,
+    base,
+    label,
+    scenesDir,
+    sceneFiles,
+    shotFile,
+    musicFile: fs.existsSync(musicFile) ? musicFile : null,
+    warnings,
+    problems,
+  };
+}
+
+// Temporary files and folders removed when the process exits for any reason (including die()).
+const exitCleanup = new Set();
+process.on('exit', () => {
+  for (const p of exitCleanup) {
+    try {
+      fs.rmSync(p, { recursive: true, force: true });
+    } catch (e) {
+      /* best effort */
+    }
+  }
+});
+function cleanupOnExit(p) {
+  exitCleanup.add(p);
+  return () => exitCleanup.delete(p);
+}
+
+function uniqueName(prefix) {
+  return `${prefix}-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Harness injected into tool pages only (never shipped). It may use performance.now.
+const HARNESS = `
+window.__h = {
+  mount(scale, only) {
+    const c = document.createElement('canvas');
+    c.id = 'tool-canvas';
+    document.body.appendChild(c);
+    FILM.mount(c, { scale, readback: true });
+    FILM.strict = false;
+    FILM.only = only || null;
+    return { w: c.width, h: c.height, duration: FILM.DURATION, frames: FILM.FRAMES };
+  },
+  render(T, o) {
+    FILM.errors = [];
+    FILM.post = !(o && o.post === false);
+    const t0 = performance.now();
+    const shot = FILM.renderFrame(T);
+    FILM.post = true;
+    FILM.ctx.getImageData(0, 0, 1, 1); // force the deferred raster to run so the timing is real
+    const ms = performance.now() - t0;
+    return { ms, shot: shot ? shot.id : null, errors: FILM.errors.map(e => ({ message: e.message, stack: e.stack, shot: e.shot, missing: !!e.missing })) };
+  },
+  png() {
+    return FILM.canvas.toDataURL('image/png').slice(22);
+  },
+  hash() {
+    const c = FILM.canvas;
+    const d = FILM.ctx.getImageData(0, 0, c.width, c.height).data;
+    let h1 = 0x811c9dc5 | 0, h2 = 0x01000193 | 0;
+    for (let i = 0; i < d.length; i++) {
+      h1 = Math.imul(h1 ^ d[i], 0x01000193);
+      if ((i & 3) === 3) h2 = Math.imul(h2 ^ h1, 0x5bd1e995);
+    }
+    return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+  },
+  sheetInit(n, cols, thumbW, labelH) {
+    const c = FILM.canvas;
+    const th = Math.round(thumbW * c.height / c.width);
+    const rows = Math.ceil(n / cols);
+    const pad = 12;
+    const s = document.createElement('canvas');
+    s.width = cols * (thumbW + pad) + pad;
+    s.height = rows * (th + labelH + pad) + pad;
+    const g = s.getContext('2d');
+    g.fillStyle = '#141414';
+    g.fillRect(0, 0, s.width, s.height);
+    this.sheet = { s, g, cols, thumbW, th, labelH, pad };
+  },
+  sheetAdd(i, label) {
+    const { g, cols, thumbW, th, labelH, pad } = this.sheet;
+    const x = pad + (i % cols) * (thumbW + pad);
+    const y = pad + Math.floor(i / cols) * (th + labelH + pad);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(FILM.canvas, x, y, thumbW, th);
+    g.fillStyle = '#e8e8e8';
+    g.font = '600 ' + Math.round(labelH * 0.42) + 'px ui-monospace, Menlo, monospace';
+    g.textBaseline = 'middle';
+    g.fillText(label[0], x + 2, y + th + labelH * 0.32);
+    g.fillStyle = '#9a9a9a';
+    g.font = Math.round(labelH * 0.34) + 'px ui-monospace, Menlo, monospace';
+    g.fillText(label[1], x + 2, y + th + labelH * 0.74);
+  },
+  sheetPng() {
+    return this.sheet.s.toDataURL('image/png').slice(22);
+  },
+  async audio(from, to, sampleRate) {
+    if (!FILM.audio || typeof FILM.audio.render !== 'function') return { missing: true };
+    const len = Math.max(1, Math.round((to - from) * sampleRate));
+    const ctx = new OfflineAudioContext(2, len, sampleRate);
+    await FILM.audio.render(ctx, { start: from, dest: ctx.destination });
+    const buf = await ctx.startRendering();
+    const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+    const inter = new Float32Array(len * 2);
+    let peak = 0;
+    for (let i = 0; i < len; i++) {
+      inter[2 * i] = L[i];
+      inter[2 * i + 1] = R[i];
+      const a = Math.max(Math.abs(L[i]), Math.abs(R[i]));
+      if (a > peak) peak = a;
+    }
+    const bytes = new Uint8Array(inter.buffer);
+    let bin = '';
+    const CH = 0x8000;
+    for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return { b64: btoa(bin), frames: len, peak };
+  },
+};
+`;
+
+function pageHtml(files, { title = 'tool' } = {}) {
+  const tags = files.map((f) => `<script src="file://${encodeURI(f)}"></script>`).join('\n');
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<style>html,body{margin:0;background:#000}</style>
+<script>window.__loadErrors=[];window.addEventListener('error',function(e){window.__loadErrors.push({message:e.message,file:(e.filename||'').split('/').pop(),line:e.lineno,col:e.colno});});</script>
+</head><body>
+${tags}
+<script>${HARNESS}</script>
+</body></html>`;
+}
+
+async function launch(extraArgs = []) {
+  let chromium;
+  try {
+    ({ chromium } = require(path.join(__dirname, 'node_modules', 'playwright')));
+  } catch (e) {
+    die(`playwright is not installed in tools/node_modules (${e.message})`);
+  }
+  // CHROMIUM_PATH (or a preinstalled Playwright chromium) wins over the version Playwright pins
+  const fs = require('fs');
+  const pre = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome'];
+  const executablePath = process.env.CHROMIUM_PATH || pre.find((p) => fs.existsSync(p));
+  return chromium.launch({ executablePath, args: ['--allow-file-access-from-files', '--disable-background-timer-throttling', ...extraArgs] });
+}
+
+/**
+ * Open a page with the given files loaded (contract order), mount the canvas at scale.
+ *   only: shot id when only that shot's file is loaded (sets FILM.only, so core skips transitions from unloaded shots)
+ * Returns { page, info, state, loadErrors, tmpFile, pageErrors, consoleErrors, reopen, close }.
+ * reopen() navigates the same page again: fresh JS state, nothing drawn yet, canvas mounted.
+ */
+async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?render=1', only = null } = {}) {
+  fs.mkdirSync(TMP, { recursive: true });
+  const tmpFile = path.join(TMP, uniqueName(prefix) + '.html');
+  fs.writeFileSync(tmpFile, pageHtml(files, { title: prefix }));
+  const forget = cleanupOnExit(tmpFile);
+  const context = await browser.newContext({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  const pageErrors = [];
+  const consoleErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error') consoleErrors.push(m.text());
+  });
+  const pg = { page, info: null, state: null, loadErrors: [], pageErrors, consoleErrors, tmpFile };
+  pg.reopen = async () => {
+    await page.goto('file://' + tmpFile + query, { waitUntil: 'load' });
+    pg.loadErrors = await page.evaluate(() => window.__loadErrors);
+    pg.state = await page.evaluate(() => ({
+      hasFilm: typeof window.FILM === 'object',
+      hasLib: !!(window.FILM && window.FILM.lib),
+      hasTimeline: !!(window.FILM && window.FILM.TIMELINE),
+      registered: window.FILM && window.FILM.registered ? window.FILM.registered : [],
+      regErrors: window.FILM && window.FILM.errors ? window.FILM.errors.map((e) => e.message) : [],
+      hasAudio: !!(window.FILM && window.FILM.audio && typeof window.FILM.audio.render === 'function'),
+    }));
+    pg.info = null;
+    if (pg.state.hasFilm && pg.state.hasTimeline) pg.info = await page.evaluate(([s, o]) => window.__h.mount(s, o), [scale, only]);
+    return pg.info;
+  };
+  let closed = false;
+  pg.close = async () => {
+    if (closed) return;
+    closed = true;
+    await context.close().catch(() => {});
+    fs.rmSync(tmpFile, { force: true });
+    forget();
+  };
+  try {
+    await pg.reopen();
+  } catch (e) {
+    await pg.close();
+    throw e;
+  }
+  return pg;
+}
+
+function writeWavFloat(file, b64, channels, sampleRate) {
+  const data = Buffer.from(b64, 'base64');
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(3, 20); // IEEE float
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * 4, 28);
+  header.writeUInt16LE(channels * 4, 32);
+  header.writeUInt16LE(32, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(data.length, 40);
+  fs.writeFileSync(file, Buffer.concat([header, data]));
+}
+
+// Patterns that would mean the shipped HTML loads or embeds media instead of computing it.
+const FORBIDDEN = [
+  { name: '<img>', re: /<img\b/gi },
+  { name: 'new Image/Audio/Video', re: /\bnew\s+(?:(?:window|self|globalThis)\s*\.\s*)?(?:Image|Audio|Video)\b/g },
+  { name: 'createElement(media tag)', re: /createElement(?:NS)?\s*\(\s*(?:[^,()]*,\s*)?['"`]\s*(?:img|image|video|audio|source|picture|track|iframe|object|embed|link)\s*['"`]/gi },
+  { name: '.src/.srcset assignment', re: /\.\s*(?:src|srcset)\s*=(?!=)/g },
+  { name: 'setAttribute(src/srcset/href)', re: /setAttribute(?:NS)?\s*\(\s*(?:[^,()]*,\s*)?['"`](?:src|srcset|href|xlink:href)['"`]/gi },
+  { name: 'fetch(', re: /\bfetch\s*\(/g },
+  { name: 'XMLHttpRequest', re: /XMLHttpRequest/g },
+  { name: 'CSS url(', re: /\burl\s*\(/g },
+  { name: 'data: URL', re: /data:[a-z0-9.+-]+\/[a-z0-9.+-]+/gi },
+  { name: 'base64', re: /base64/gi },
+  { name: 'atob/btoa', re: /\b(atob|btoa)\s*\(/g },
+  { name: '<audio>/<video>/<source>/<iframe>/<object>/<embed>', re: /<(audio|video|source|iframe|object|embed)\b/gi },
+  { name: '<link>', re: /<link\b/gi },
+  { name: 'external <script src>', re: /<script\b[^>]*\bsrc\s*=/gi },
+  { name: '@font-face / @import', re: /@(font-face|import)\b/gi },
+  { name: 'FontFace', re: /\bFontFace\b/g },
+  { name: 'dynamic import(', re: /\bimport\s*\(/g },
+  { name: 'WebSocket/EventSource/sendBeacon', re: /\b(WebSocket|EventSource|sendBeacon)\b/g },
+  { name: 'createObjectURL', re: /createObjectURL/g },
+  { name: 'decodeAudioData', re: /decodeAudioData/g },
+  { name: 'media file name', re: /["'`][^"'`\n]*\.(png|jpe?g|gif|webp|avif|svg|bmp|ico|mp3|wav|ogg|oga|m4a|aac|flac|mp4|webm|mov|woff2?|ttf|otf|eot)["'`]/gi },
+];
+
+function scanForbidden(html) {
+  const hits = [];
+  const lines = html.split('\n');
+  for (const f of FORBIDDEN) {
+    for (let i = 0; i < lines.length; i++) {
+      f.re.lastIndex = 0;
+      let m;
+      while ((m = f.re.exec(lines[i]))) {
+        const col = m.index;
+        hits.push({ pattern: f.name, line: i + 1, text: lines[i].slice(Math.max(0, col - 40), col + 60).trim() });
+        if (!f.re.global) break;
+      }
+    }
+  }
+  return hits;
+}
+
+function fmtT(T) {
+  return T.toFixed(3);
+}
+
+module.exports = {
+  ROOT,
+  SLUG,
+  SRC,
+  FIX,
+  TMP,
+  FPS,
+  die,
+  parseArgs,
+  resolveOut,
+  rel,
+  loadTimeline,
+  normalizeTimeline,
+  sources,
+  uniqueName,
+  cleanupOnExit,
+  pageHtml,
+  launch,
+  openPage,
+  writeWavFloat,
+  fmtT,
+  FORBIDDEN,
+  scanForbidden,
+};
