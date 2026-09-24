@@ -34,10 +34,10 @@
     // Master tilt EQ in dB: a low shelf under the subs, presence and air for phone speakers.
     eq: { low: -4, presence: 5, air: 3 },
     comp: { threshold: -18, knee: 10, ratio: 2, attack: 0.006, release: 0.2 },
-    // Section fader rides in dB at global times, pre-compressor: quiet egg, hushed pupa, full drop,
-    // hushed winter, and an ending level that meets the opening level at the loop seam.
-    // Per film: section fader rides in dB at global times, pre-compressor (see reference/music.md).
-    ride: [[0, 0]],
+    // Section fader rides in dB at global times, pre-compressor. The whole piece is a bed under a
+    // voice-over, so it sits well below a solo mix; the rides only shape the acts and fade the final
+    // chord to silence by 59.8 (the seam then meets the opening air swell from silence).
+    ride: [[0, -6]],
   };
 
   // ---------------------------------------------------------------- pitch

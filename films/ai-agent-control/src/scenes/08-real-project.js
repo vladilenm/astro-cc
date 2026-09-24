@@ -198,7 +198,7 @@
           });
         }
         overlay(c, L, aLine, wk);
-        pulses(c, L, pT, dotA);
+        pulses(c, L, pT, dotA, E.inOutSine(clamp((t - B_THIN) / THIN_DUR)));
       });
 
       // ---- 4. lesson card outline (draws on from the top centre both ways) + chips ----
