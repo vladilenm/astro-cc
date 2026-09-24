@@ -250,6 +250,13 @@
   // Global post: boiling grain
   // ---------------------------------------------------------------------------
 
+  // Global grain strength (art bible §4.3). ?grain=<k> overrides it for tests.
+  FILM.GRAIN = 0.3; // tuned for Instagram: full-strength boiling grain costs ~30 Mbit/s and turns to mush in the platform re-encode
+  if (typeof location !== 'undefined') {
+    const m = /[?&]grain=([0-9.]+)/.exec(location.search || '');
+    if (m) FILM.GRAIN = Number(m[1]);
+  }
+
   const TILE = 512;
   const VARIANTS = 4;
   const grainCache = {};
@@ -298,6 +305,7 @@
     let amount = 1;
     if (typeof cfg === 'number') amount = cfg;
     else if (cfg && typeof cfg === 'object' && cfg.grain != null) amount = Number(cfg.grain);
+    amount *= FILM.GRAIN;
     if (!(amount > 0)) return;
     const b = Math.floor(T * FILM.BOIL_FPS + EPS);
     const v = Math.floor(ihash(b, 17, 3) * VARIANTS);

@@ -15,6 +15,7 @@
 //   --crf N            x264 quality (default 16)   --preset p   x264 preset (default medium)
 //   --fixtures         use tools/fixtures instead of src
 //   --clean            no burned-in captions (clean master for re-captioning after the voice-over)
+//   --grain k          grain strength multiplier for this render (tests)
 //
 // Video: libx264, yuv420p (BT.709), crf 16, 24 fps, +faststart. Audio: OfflineAudioContext rendered in the
 // page at 48 kHz stereo, written as WAV, muxed as AAC 192k.
@@ -99,7 +100,7 @@ async function main() {
     // one browser process per worker so pages really render in parallel
     for (let i = 0; i < workers; i++) launches.push(C.launch());
     const bs = await Promise.all(launches);
-    pages = await Promise.all(bs.map((b, i) => C.openPage(b, src.files, { scale, prefix: `render-w${i}`, query: args.clean ? '?render=1&captions=0' : '?render=1' })));
+    pages = await Promise.all(bs.map((b, i) => C.openPage(b, src.files, { scale, prefix: `render-w${i}`, query: '?render=1' + (args.clean ? '&captions=0' : '') + (args.grain != null ? `&grain=${Number(args.grain)}` : '') })));
     for (const pg of pages) {
       const problems = [...pg.loadErrors.map((e) => `${e.file}:${e.line}:${e.col} ${e.message}`), ...pg.state.regErrors, ...pg.pageErrors];
       if (problems.length || !pg.info) throw new Error(`scripts failed to load:\n  ${problems.join('\n  ') || 'FILM did not initialise'}`);

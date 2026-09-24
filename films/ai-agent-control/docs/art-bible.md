@@ -101,7 +101,7 @@ Depth comes from layering panels (panel over bg, panelHi rows inside panels) and
 
 ### 4.3 Grain
 
-`core` lays a neutral grain (faint light specks, dark clumps) over every shot on the 12 fps boil clock. Scenes add no full-frame grain.
+`core` lays a neutral grain (faint light specks, dark clumps) over every shot on the 12 fps boil clock, at `FILM.GRAIN = 0.3` of the tile strength: stronger boiling grain cost ~30 Mbit/s at crf 16 and breaks up in Instagram's re-encode. Scenes add no full-frame grain.
 
 ### 4.4 Background drift
 
