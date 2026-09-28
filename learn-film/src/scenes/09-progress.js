@@ -38,18 +38,19 @@
     const pad = (r, p) => ({ x: r.x - p, y: r.y - p, w: r.w + 2 * p, h: r.h + 2 * p });
 
     // the guide top (60 cut only): brand + resume card, in page space above the lesson
-    const CR = { x: 960, y: -400, z: 1 }; // camera on the guide top: screen y = page y + 940
-    const RES = { x: 360, y: 450 - 940, w: 1200, h: 200 }; // resumeCard at screen (360, 450)
-    const BRAND = { x: 360, y: 372 - 940 };
+    // (resumeCard's title runs into its «Продолжить» button below w ≈ 1300, so the card is 1320 wide)
+    const CR = { x: 960, y: -440, z: 1 }; // camera on the guide top: screen y = page y + 980
+    const RES = { x: 300, y: 470 - 980, w: 1320, h: 200 }; // resumeCard at screen (300, 470)
+    const BRAND = { x: 300, y: 392 - 980 };
     const RES_BTN = [RES.x + RES.w - 175 + 34, RES.y + RES.h / 2 + 18]; // cursor tip on «Продолжить»
 
     // focuses: camera + spotlight hole (page rects)
     const FOC = {
-      V: { cam: camAt(620, 531, 820, 590, 1.2), hole: pad(G.video, 14) },
-      M: { cam: camAt(1480, 250, 960, 290, 1.25), hole: pad(G.materials, 14) },
-      T: { cam: camAt(120, 852, 110, 300, 1.25), hole: { x: 128, y: 862, w: 1052, h: 468 } },
-      C: { cam: camAt(1180, 960, 900, 350, 1.2), hole: { x: 1182, y: 958, w: 596, h: 462 } },
-      R: { cam: CR, hole: { x: -400, y: -1500, w: 2720, h: 3400 } },
+      V: { cam: camAt(620, 531, 820, 590, 1.2), hole: pad(G.video, 14), dim: 0.5 },
+      M: { cam: camAt(1480, 250, 960, 290, 1.25), hole: pad(G.materials, 14), dim: 0.5 },
+      T: { cam: camAt(120, 852, 110, 300, 1.25), hole: { x: 128, y: 862, w: 1052, h: 468 }, dim: 0.52 },
+      C: { cam: camAt(1180, 960, 960, 350, 1.2), hole: { x: 1182, y: 958, w: 596, h: 462 }, dim: 0.64 },
+      R: { cam: CR, hole: { x: -400, y: -1500, w: 2720, h: 3400 }, dim: 0 },
     };
     const KEYS = {
       60: [[0, 'V'], [1.5, 'V'], [2.0, 'M'], [3.0, 'M'], [3.5, 'T'], [8.55, 'T'], [9.05, 'C'], [12.0, 'C'], [13.3, 'R']],
@@ -74,7 +75,7 @@
     const C_REST = [1080, 1006]; // right of the practice header
     const BOX = [cr.x + 44, cr.y + 108]; // criterion 1 check square centre
     const C_BOX = [BOX[0] + 4, BOX[1] + 4];
-    const C_OFF = [1318, 1142]; // just off the ticked box
+    const C_OFF = [1676, 1104]; // off the ticked box, past the end of its label
     const C_DONE = [dn.x + 252, dn.y + 44]; // on «Я сделал»
     const C_AWAY = [1700, 1250]; // empty corner of the criteria box
 
@@ -118,7 +119,7 @@
         return {
           x: lerp(A.x, B.x, q), y: lerp(A.y, B.y, q), z,
           hole: { x: lerp(FOC[a].hole.x, FOC[b].hole.x, q), y: lerp(FOC[a].hole.y, FOC[b].hole.y, q), w: lerp(FOC[a].hole.w, FOC[b].hole.w, q), h: lerp(FOC[a].hole.h, FOC[b].hole.h, q) },
-          dim: 0.5 * (1 - (a === 'R' ? 1 : 0)) * (1 - (b === 'R' ? clamp(q * 2.5) : 0)),
+          dim: b === 'R' ? FOC[a].dim * (1 - clamp(q * 2.5)) : lerp(FOC[a].dim, FOC[b].dim, q),
         };
       });
     }
@@ -213,6 +214,8 @@
           ui.icon(g, 'check', 0, 0, 22, { color: P.green, lw: 3.2 });
           g.restore();
         }
+        // «Выполнено» lands with a soft green ring (after the manual press only)
+        if (u > s.done && u < s.done + 0.6) ui.ripple(g, dn.x + dn.w / 2, dn.y + dn.h / 2, (u - s.done) / 0.6, { color: P.green, r: 150 });
         if (cut === 60 && cam.y < 700) {
           ui.brand(g, BRAND.x, BRAND.y, { size: 56 });
           if (s.res != null) ui.resumeCard(g, RES.x, RES.y, RES.w, RES.h, { a: ui.appear(u, s.res, 0.5), hover: k(u, s.resHover, 0.3) });
@@ -265,8 +268,8 @@
         // handoff line from the notes to the window
         const la = k(u, s.thumb + 0.1, 0.5) * (1 - k(u, cut === 60 ? 8.55 : 5.9, 0.3));
         if (la > 0) {
-          const [nx, ny] = toScreen(cam, G.notes.x + G.notes.w, G.notes.y + 60);
-          ui.route(ctx, [[nx + 6, ny], [nx + 120, ny - 150], [TH.x + TH.w * 0.42, TH.y + TH.h + 70], [TH.x + TH.w * 0.42, TH.y + TH.h + 4]], { to: la, width: 3, alpha: 0.85 * la, glow: 0.7 });
+          const [nx, ny] = toScreen(cam, G.notes.x + G.notes.w - 30, G.notes.y);
+          ui.route(ctx, [[nx, ny - 4], [nx + 22, ny - 110], [nx + 60, ny - 200], [TH.x + 110, TH.y + TH.h + 6]], { to: la, width: 3, alpha: 0.85 * la, glow: 0.7 });
         }
         const dy = (1 - tha) * 20;
         ctx.save();

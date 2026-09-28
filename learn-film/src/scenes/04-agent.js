@@ -79,10 +79,8 @@
     ctx.restore();
   }
 
-  /** Word layout of the route name: start (inside the G3 card) and end (title position). Cached. */
-  let WORDS = null;
+  /** Word layout of the route name: start (inside the G3 card) and end (title position). */
   function words(ctx) {
-    if (WORDS) return WORDS;
     const U = FILM.ui;
     const G = U.G3;
     const R = U.ROUTES[0];
@@ -105,7 +103,6 @@
         full = full ? full + ' ' + wd : wd;
       });
     });
-    WORDS = out;
     return out;
   }
 
