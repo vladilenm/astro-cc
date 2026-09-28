@@ -118,8 +118,8 @@
         if (b === 'R' && a !== 'R') z *= 1 - 0.46 * Math.sin(Math.PI * q); // out, up, back in
         return {
           x: lerp(A.x, B.x, q), y: lerp(A.y, B.y, q), z,
-          hole: { x: lerp(FOC[a].hole.x, FOC[b].hole.x, q), y: lerp(FOC[a].hole.y, FOC[b].hole.y, q), w: lerp(FOC[a].hole.w, FOC[b].hole.w, q), h: lerp(FOC[a].hole.h, FOC[b].hole.h, q) },
-          dim: b === 'R' ? FOC[a].dim * (1 - clamp(q * 2.5)) : lerp(FOC[a].dim, FOC[b].dim, q),
+          // the spotlight cross-fades from the old focus to the new one during a glide
+          spots: a === b ? [[FOC[a].hole, FOC[a].dim]] : [[FOC[a].hole, FOC[a].dim * (1 - q)], [FOC[b].hole, FOC[b].dim * q]],
         };
       });
     }
@@ -229,15 +229,16 @@
         }
       });
       // spotlight: dim everything but the focused zone
-      if (cam.dim > 0.001) {
-        const [hx, hy] = toScreen(cam, cam.hole.x, cam.hole.y);
+      cam.spots.forEach(([h, d]) => {
+        if (d <= 0.001) return;
+        const [hx, hy] = toScreen(cam, h.x, h.y);
         g.save();
-        ui.rrect(g, hx, hy, cam.hole.w * cam.z, cam.hole.h * cam.z, 28 * cam.z); // (rrect begins the path)
+        ui.rrect(g, hx, hy, h.w * cam.z, h.h * cam.z, 28 * cam.z); // (rrect begins the path)
         g.rect(0, 0, 1920, 1080);
-        g.fillStyle = L.rgba(P.bg, cam.dim);
+        g.fillStyle = L.rgba(P.bg, d);
         g.fill('evenodd');
         g.restore();
-      }
+      });
       ctx.drawImage(lay, 0, 0, 1920, 1080);
       // soft edges: the page fades into the background at the sides; the subtitle band keeps only a
       // dim trace of it (cheap bg-coloured veils rather than a destination-in mask)
@@ -255,8 +256,8 @@
       // top scrim (the title band reads over the page)
       const sg = ctx.createLinearGradient(0, 0, 0, 330);
       sg.addColorStop(0, L.rgba(P.bg, 1));
-      sg.addColorStop(0.6, L.rgba(P.bg, 0.97));
-      sg.addColorStop(0.82, L.rgba(P.bg, 0.6));
+      sg.addColorStop(0.55, L.rgba(P.bg, 1));
+      sg.addColorStop(0.8, L.rgba(P.bg, 0.7));
       sg.addColorStop(1, L.rgba(P.bg, 0));
       ctx.fillStyle = sg;
       ctx.fillRect(0, 0, 1920, 330);

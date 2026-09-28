@@ -1540,7 +1540,7 @@
     ctx.translate(0, (1 - a) * 24);
     ui.card(ctx, x, y, w, h, { r: 24, glow: 0.5 });
     ui.glyph(ctx, 'agent', x + 90, y + h / 2 - 10, 64, {});
-    // needs w >= 1200 and h >= 200
+    // needs w >= 1320 and h >= 200
     ui.text(ctx, 'Продолжим с того места, где остановились', x + 160, y + 76, { size: 36, weight: 600 });
     ui.text(ctx, 'Собрать первого агента · Шаг 2 из 3', x + 160, y + 120, { size: 26, color: P.text2 });
     ui.progress(ctx, x + 160, y + 150, 360, 1 / 3, {});
@@ -1567,7 +1567,19 @@
     if (!cue) return;
     const fade = Math.min(ui.k(T, cue.t0, 0.12, 'linear'), 1 - ui.k(T, cue.t1 - 0.12, 0.12, 'linear'));
     const o = { size: SUB.size, weight: 500, tracking: -0.2 };
-    const lines = ui.wrap(ctx, cue.text, 1400, o).slice(0, 2);
+    let lines = ui.wrap(ctx, cue.text, 1400, o).slice(0, 2);
+    if (lines.length === 2) {
+      // balance the two lines: pick the break that minimises the longer line
+      const words = cue.text.split(' ');
+      let best = null;
+      for (let i = 1; i < words.length; i++) {
+        const a = words.slice(0, i).join(' ');
+        const b = words.slice(i).join(' ');
+        const m = Math.max(ui.measure(ctx, a, o), ui.measure(ctx, b, o));
+        if (m <= 1400 && (!best || m < best.m)) best = { m, l: [a, b] };
+      }
+      if (best) lines = best.l;
+    }
     const wmax = Math.max(...lines.map((l) => ui.measure(ctx, l, o)));
     const top = SUB.base - (lines.length - 1) * SUB.lh - SUB.size * 0.9 - SUB.padY;
     const bot = SUB.base + SUB.size * 0.28 + SUB.padY;
