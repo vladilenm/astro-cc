@@ -28,7 +28,7 @@
   const SCHED = {
     // l1 starts a hair before the cut so its first frame already shows the word rising
     60: { kicker: 0, l1: -0.08, l2: 0.6, line: [0.5, 2.3] },
-    45: { kicker: 0, l1: -0.08, l2: 0.1, line: [0.2, 1.6] },
+    45: { kicker: 0, l1: -0.08, l2: 0.05, line: [0.2, 1.6] },
   };
 
   FILM.scene({

@@ -31,7 +31,7 @@
   // --- shared with 02-guide.js (verbatim copy there): the empty project card -------------------
   /** the dashed «Мой проект» card; ca = content alpha (caption + plus), k = 0 project look → 1 contour look */
   function drawProject(ctx, x, y, w, h, ca, k) {
-    U.card(ctx, x, y, w, h, { r: 24, dashed: true, stroke: L.mix(P.borderHi, P.border, k || 0), lw: 1.5 + 0.5 * (1 - (k || 0)) });
+    U.card(ctx, x, y, w, h, { r: 24, dashed: true, stroke: L.mix(P.borderHi, P.text3, k || 0), lw: 2 });
     if (ca <= 0) return;
     const cx = x + w / 2;
     const cy = y + h / 2;

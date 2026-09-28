@@ -94,17 +94,17 @@
     { text: 'Портфолио', kind: 'card', p0: [626, 384], p1: [560, 412] },
     { text: 'Курс по Figma', kind: 'pill', p0: [140, 700], p1: [176, 676] },
     { text: 'Идея для SaaS', kind: 'pill', p0: [620, 718], p1: [560, 690] },
-    { kind: 'blank', w: 190, p0: [760, 560], p1: [712, 544] },
-    { kind: 'blank', w: 150, p0: [126, 560], p1: [150, 548], short: true },
+    { kind: 'blank', w: 150, p0: [126, 560], p1: [124, 552], short: true },
   ];
 
   // ---------------------------------------------------------------------------
   // Local helpers
   // ---------------------------------------------------------------------------
 
-  /** arc-length sampler over the kit's Catmull-Rom curve (t-independent, cached per key) */
+  /** arc-length sampler over the kit's Catmull-Rom curve (t-independent, cached by its points) */
   const PATHS = {};
-  function pathOf(key, pts) {
+  function pathOf(pts) {
+    const key = pts.map((q) => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(';');
     if (PATHS[key]) return PATHS[key];
     const S = FILM.ui.curve(pts, 24);
     const len = [0];
@@ -123,11 +123,9 @@
 
   /** a small idea-note card: Learn card, one line of Onest 600. Returns width. */
   function noteCard(ctx, U, x, y, w, h, text, o) {
-    ctx.save();
-    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
-    U.card(ctx, x, y, w, h, { r: o.r != null ? o.r : 16, glow: o.glow || 0, fill: o.fill, shadow: o.shadow != null ? o.shadow : 0.8 });
-    if (text) U.text(ctx, text, x + o.tx, y + o.ty, { size: o.size, weight: 600, color: o.color || P.text, alpha: o.textAlpha });
-    ctx.restore();
+    const a = o.alpha != null ? o.alpha : 1;
+    U.card(ctx, x, y, w, h, { r: o.r != null ? o.r : 16, glow: o.glow || 0, fill: o.fill, shadow: o.shadow != null ? o.shadow : 0.8, alpha: a });
+    if (text) U.text(ctx, text, x + o.tx, y + o.ty, { size: o.size, weight: 600, color: o.color || P.text, alpha: o.textAlpha != null ? o.textAlpha : a });
   }
 
   /** a caret (typing cursor) after a string, in the current transform */
@@ -232,7 +230,7 @@
       const segT = [S.steps[0] - 0.15, S.steps[0] + 0.3, S.steps[1] + 0.3, S.steps[2] + 0.3, S.who + 0.3];
       let reachY = rowMid[0];
       for (let k = 1; k < rowMid.length; k++) {
-        const q = U.k(t, segT[k - 1] + (k === 1 ? 0 : 0.0), segT[k] - segT[k - 1], 'inOutCubic');
+        const q = U.k(t, segT[k - 1], segT[k] - segT[k - 1], 'inOutCubic');
         if (t >= segT[k - 1]) reachY = lerp(rowMid[k - 1], rowMid[k], q);
       }
       const bStarted = t > segT[0];
@@ -281,26 +279,29 @@
       }
       ctx.restore();
 
-      // --- 5 route A: from the cluster to the goal row ---------------------
-      const w0 = noteWidth(ctx, U, NOTES[0]);
-      const g0 = [lerp(NOTES[0].p0[0], NOTES[0].p1[0], gather), lerp(NOTES[0].p0[1], NOTES[0].p1[1], gather) + NOTE_H / 2];
-      const g1 = [NOTES[0].p1[0], NOTES[0].p1[1] + NOTE_H / 2]; // gathered anchor (left-middle)
+      // --- 5 route A: from the chosen note to the goal row -------------------
+      // The route starts at the gathered note's right edge; while the note flies, the route head stays
+      // under the card (right edge at u = 0 → left edge at u = 1), so the line trails out of it.
+      const n0 = NOTES[0];
+      const w0 = noteWidth(ctx, U, n0);
+      const SC0 = 1.06; // chosen note scale once gathered
+      const gw = w0 * SC0;
+      const gh = NOTE_H * SC0;
+      const gL = n0.p1[0] - (gw - w0) / 2; // gathered card rect
+      const gT = n0.p1[1] - (gh - NOTE_H) / 2;
       const goalL = [sx(GUTTER_X), sy(GOAL_Y + GOAL_H / 2)];
-      const route = pathOf('A', [
-        g1,
-        [g1[0] + w0 + 90, g1[1] + 18],
-        [930, sy(GOAL_Y + GOAL_H / 2) + 30],
-        [goalL[0] - 70, goalL[1]],
-        goalL,
-      ]);
+      const goalRect = [sx(BODY_X), sy(GOAL_Y), (LW - 2 * BODY_X) * SS, GOAL_H * SS];
+      const r0 = [gL + gw, gT + gh / 2];
+      const route = pathOf([r0, [r0[0] + 150, r0[1] + 4], [goalL[0] - 150, goalL[1] + 26], [goalL[0] - 40, goalL[1]], goalL]);
       if (flyU > 0) {
+        // the spot the idea was picked from: a dashed ghost of the note, the route's origin
+        const ga = U.k(t, S.fly[0], 0.35, 'outCubic');
+        U.card(ctx, gL, gT, gw, gh, { r: 16, dashed: true, stroke: A(P.accent, 0.45), alpha: ga });
         U.route(ctx, route.pts, { from: 0, to: flyU, width: 4, glow: 1, head: !bStarted, alpha: landed ? 1 - 0.25 * land : 1 });
       }
 
       // --- 6 the chosen note ------------------------------------------------
       {
-        const goalRect = [sx(BODY_X), sy(GOAL_Y), (LW - 2 * BODY_X) * SS, GOAL_H * SS];
-        const glow = gather;
         let x;
         let y;
         let w;
@@ -308,39 +309,43 @@
         let size;
         let ty;
         let tx;
+        let rr;
         if (flyU <= 0) {
-          const sc = 1 + 0.06 * E.outBack(gather) - 0.0 * gather;
+          const sc = 1 + (SC0 - 1) * E.outBack(gather);
           w = w0 * sc;
           h = NOTE_H * sc;
-          const a0 = [g0[0] + drift(0, 0) * (1 - gather), g0[1] + drift(0, 2.1) * (1 - gather)];
-          x = a0[0] - (w - w0) / 2;
-          y = a0[1] - h / 2;
+          const cx = lerp(n0.p0[0], n0.p1[0], gather) + w0 / 2 + drift(0, 0) * (1 - gather);
+          const cy = lerp(n0.p0[1], n0.p1[1], gather) + NOTE_H / 2 + drift(0, 2.1) * (1 - gather);
+          x = cx - w / 2;
+          y = cy - h / 2;
           size = NOTE_SIZE * sc;
           tx = 28 * sc;
           ty = h / 2 + size * 0.36;
+          rr = 16;
         } else {
-          const anc = route.at(flyU);
-          const sc0 = 1.06;
-          w = lerp(w0 * sc0, goalRect[2], flyU);
-          h = lerp(NOTE_H * sc0, goalRect[3], flyU);
-          // left edge rides just ahead of the route head, landing on the goal row's left edge
-          x = anc[0] + lerp(-(w0 * sc0 - w0) / 2, goalRect[0] - goalL[0], flyU);
-          y = anc[1] - h / 2;
-          size = lerp(NOTE_SIZE * sc0, GOAL_FONT.size * SS, flyU);
-          tx = lerp(28 * sc0, 24 * SS, flyU);
-          ty = lerp(h / 2 + size * 0.36, 76 * SS, flyU);
+          const m = E.inOutCubic(clamp((flyU - 0.45) / 0.55)); // morph into the row late in the flight
+          const head = route.at(flyU);
+          w = lerp(gw, goalRect[2], m);
+          h = lerp(gh, goalRect[3], m);
+          x = head[0] - w * (1 - flyU) + (goalRect[0] - goalL[0]) * flyU;
+          y = head[1] - h / 2 + (goalRect[1] + goalRect[3] / 2 - goalL[1]) * flyU;
+          size = lerp(NOTE_SIZE * SC0, GOAL_FONT.size * SS, m);
+          tx = lerp(28 * SC0, 24 * SS, m);
+          ty = lerp(h / 2 + size * 0.36, 76 * SS, m);
+          rr = lerp(16, 14 * SS, m);
         }
         const fade = landed ? 1 - land : 1;
         if (fade > 0.001) {
           noteCard(ctx, U, x, y, w, h, CHOSEN, {
             alpha: fade,
-            glow: glow,
+            textAlpha: 1, // the kit's goal text lies exactly under it, so the words never dim
+            glow: gather,
             size,
             tx,
             ty,
-            r: lerp(16, 14 * SS, flyU),
-            fill: L.mix(P.card, P.accentDeep, 0.12 * glow),
-            shadow: 0.8 * (1 - flyU) + 0.2,
+            r: rr,
+            fill: L.mix(P.card, P.accentDeep, 0.12 * gather),
+            shadow: 0.8,
           });
         }
       }

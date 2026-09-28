@@ -31,27 +31,27 @@
   // ---------------------------------------------------------------------------
   // Geometry
   // ---------------------------------------------------------------------------
-  const BRIEF = { x: 120, y: 300, w: 740, h: 480 };
-  const WIN = { x: 1020, y: 300, w: 780, h: 480 };
+  const BRIEF = { x: 120, y: 300, w: 740, h: 464 };
+  const WIN = { x: 1020, y: 300, w: 780, h: 464 };
   // phone-shaped preview inside the window body (body starts at WIN.y + 52)
-  const PHONE = { x: 1090, y: 378, w: 300, h: 382 };
-  const BTN_OK = { x: 1114, y: 676, w: 252, h: 60 };
-  const BTN_BAD = { x: 1300, y: 690, w: 96, h: 46, rot: -0.06 };
-  const CLICK = [1262, 716];
+  const PHONE = { x: 1090, y: 374, w: 300, h: 368 };
+  const BTN_OK = { x: 1114, y: 660, w: 252, h: 60 };
+  const BTN_BAD = { x: 1300, y: 676, w: 96, h: 46, rot: -0.06 };
+  const CLICK = [1262, 700];
   const ROUTE = [[866, 492], [944, 498], [1000, 584], [1086, 602]];
-  const CHECK_PILL = { x: 1596, y: 536 };
+  const CHECK_PILL = { x: 1596, y: 520 };
 
   // ---------------------------------------------------------------------------
   // Schedules (local seconds)
   // ---------------------------------------------------------------------------
   const COMMON = {
-    fly: 0.1, flyDur: 0.7, flyStagger: 0.06,
+    fly: 0.1, flyDur: 0.72, flyStagger: 0,
     morph: 0.22, morphDur: 0.72,
     brief: 0.62, labels: 0.86,
     kicker: 0.55,
     cursorIn: 4.1, cursorAt: 4.8, click: 4.9,
-    checked: 5.2, caption: 5.25,
-    out: 5.45, shrink: 5.5,
+    checked: 5.2, caption: 5.22,
+    out: 5.5, shrink: 5.44,
   };
   const SCHED = {
     60: Object.assign({}, COMMON, { type: [[1.2, 0.55], [1.8, 0.55], [2.4, 0.55]], win: 3.0, route: 3.2, routeDur: 0.72, fix: 4.2 }),
@@ -174,8 +174,8 @@
         return;
       }
 
-      const out = 1 - U.k(t, S.out, 0.36, 'inOutCubic'); // everything but the window fades
-      const shrink = U.k(t, S.shrink, 0.5, 'inOutCubic'); // window → G4
+      const out = 1 - U.k(t, S.out, 0.3, 'inOutCubic'); // everything but the window fades
+      const shrink = U.k(t, S.shrink, 0.48, 'inOutCubic'); // window → G4
 
       // 1 · brief (grows out of the route card) ------------------------------
       if (out > 0) {
@@ -260,7 +260,7 @@
             const e = U.k(t, S.fly + i * S.flyStagger, S.flyDur, 'inOutCubic');
             const size = lerp(40, U.TITLE.size, e);
             const x = lerp(wd.sx, wd.ex, e);
-            const y = lerp(wd.sy, wd.ey, e) - Math.sin(e * Math.PI) * 30;
+            const y = lerp(wd.sy, wd.ey, e) - Math.sin(e * Math.PI) * 16;
             const col = wd.w === 'агента' ? L.mix(P.text, P.accent, e) : P.text;
             U.text(ctx, wd.w, x, y, { size, weight: 600, tracking: lerp(-0.01 * 40, -0.02 * U.TITLE.size, e), color: col });
           });
@@ -278,12 +278,12 @@
       }
 
       // 6 · caption pill -------------------------------------------------------
-      const ca = U.appear(t, S.caption, 0.35);
+      const ca = U.appear(t, S.caption, 0.3);
       if (ca > 0 && out > 0) {
         ctx.save();
         ctx.globalAlpha *= out * ca;
         ctx.translate(0, (1 - ca) * 20);
-        U.pill(ctx, 960, 804, U.ROUTES[0].resultLong, { size: 28, align: 'center' });
+        U.pill(ctx, 960, 786, U.ROUTES[0].resultLong, { size: 28, align: 'center' });
         ctx.restore();
       }
 
