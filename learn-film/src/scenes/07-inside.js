@@ -53,7 +53,7 @@
 
     // focuses: camera + spotlight hole (page rects)
     const FOC = {
-      V: { cam: camAt(620, 531, 820, 590, 1.2), hole: pad(G.video, 14), dim: 0.5 },
+      V: { cam: camAt(620, 531, 820, 602, 1.2), hole: pad(G.video, 14), dim: 0.5 },
       M: { cam: camAt(1480, 250, 960, 290, 1.25), hole: pad(G.materials, 14), dim: 0.5 },
       T: { cam: camAt(120, 852, 110, 300, 1.25), hole: { x: 128, y: 862, w: 1052, h: 468 }, dim: 0.52 },
       C: { cam: camAt(1180, 960, 960, 350, 1.2), hole: { x: 1182, y: 958, w: 596, h: 462 }, dim: 0.64 },
@@ -245,27 +245,19 @@
         g.fill('evenodd');
         g.restore();
       }
-      // soft edges: sides fade out, the subtitle band keeps only a dim trace of the page
-      g.save();
-      g.globalCompositeOperation = 'destination-in';
-      const gh = g.createLinearGradient(0, 0, 1920, 0);
-      gh.addColorStop(0, L.rgba(P.bg, 0));
-      gh.addColorStop(0.03, L.rgba(P.bg, 0.15));
-      gh.addColorStop(0.09, L.rgba(P.bg, 1));
-      gh.addColorStop(0.91, L.rgba(P.bg, 1));
-      gh.addColorStop(0.97, L.rgba(P.bg, 0.15));
-      gh.addColorStop(1, L.rgba(P.bg, 0));
-      g.fillStyle = gh;
-      g.fillRect(0, 0, 1920, 1080);
-      const gv = g.createLinearGradient(0, 0, 0, 1080);
-      gv.addColorStop(0, L.rgba(P.bg, 1));
-      gv.addColorStop(860 / 1080, L.rgba(P.bg, 1));
-      gv.addColorStop(940 / 1080, L.rgba(P.bg, 0.2));
-      gv.addColorStop(1, L.rgba(P.bg, 0.1));
-      g.fillStyle = gv;
-      g.fillRect(0, 0, 1920, 1080);
-      g.restore();
       ctx.drawImage(lay, 0, 0, 1920, 1080);
+      // soft edges: the page fades into the background at the sides; the subtitle band keeps only a
+      // dim trace of it (cheap bg-coloured veils rather than a destination-in mask)
+      const veil = (x0, y0, x1, y1, stops, rx, ry, rw, rh) => {
+        const gr = ctx.createLinearGradient(x0, y0, x1, y1);
+        stops.forEach(([o, a]) => gr.addColorStop(o, L.rgba(P.bg, a)));
+        ctx.fillStyle = gr;
+        ctx.fillRect(rx, ry, rw, rh);
+      };
+      const side = [[0, 1], [0.35, 0.86], [1, 0]];
+      veil(0, 0, 170, 0, side, 0, 0, 170, 1080);
+      veil(1920, 0, 1750, 0, side, 1750, 0, 170, 1080);
+      veil(0, 860, 0, 1080, [[0, 0], [0.36, 0.8], [1, 0.9]], 0, 860, 1920, 220);
 
       // top scrim (the title band reads over the page)
       const sg = ctx.createLinearGradient(0, 0, 0, 330);

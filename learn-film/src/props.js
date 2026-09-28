@@ -1314,7 +1314,7 @@
   /**
    * planSheet(ctx, x, y, w, h, st) : "План на неделю" (weekly-plan.md).
    *   st.goal 0..1 (the "Результат недели" row types in) · st.steps [p1, p2, p3] (each step row appears)
-   *   st.active 0..1 (step 1 highlighted) · st.who 0..1 ("Кому покажу результат" row) · st.alpha · st.glow · st.compact
+   *   st.title ('План на неделю') · st.active 0..1 (step 1 highlighted) · st.who 0..1 ("Кому покажу результат" row) · st.alpha · st.glow · st.compact
    * Texts: goal 'Лендинг с формой заявки'; steps 'Собрать первый экран', 'Подключить форму', 'Показать трём людям'.
    */
   ui.PLAN = Object.freeze({
@@ -1326,7 +1326,7 @@
     ctx.save();
     ctx.globalAlpha *= st.alpha != null ? st.alpha : 1;
     const c = !!st.compact;
-    const body = ui.sheet(ctx, x, y, w, h, { file: 'weekly-plan.md', title: 'План на неделю', glow: st.glow || 0, titleSize: c ? 34 : 40 });
+    const body = ui.sheet(ctx, x, y, w, h, { file: 'weekly-plan.md', title: st.title || 'План на неделю', glow: st.glow || 0, titleSize: c ? 34 : 40 });
     const gy = body.y + 4;
     const gh = c ? 72 : 96;
     // goal row

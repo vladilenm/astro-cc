@@ -105,7 +105,7 @@
           ctx.restore();
         }
         else if (i === 1) drawSchemaCard(U, ctx, x, y, ROW.w, ROW.h, glow);
-        else U.planSheet(ctx, x, y, ROW.w, ROW.h, { compact: true, glow, goal: 1, steps: [1, 1, 1], active: 0, who: 1 });
+        else U.planSheet(ctx, x, y, ROW.w, ROW.h, { compact: true, title: 'План проекта', glow, goal: 1, steps: [1, 1, 1], active: 0, who: 1 });
         ctx.restore();
       }
 
