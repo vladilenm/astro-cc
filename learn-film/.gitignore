@@ -1,0 +1,17 @@
+# Secret hygiene
+.env*
+*.pem
+*.key
+*credentials*
+client_secret*.json
+*token*.json
+.mcp.json
+*.mcp.json
+.mcp.local.json
+
+# Film build outputs
+node_modules/
+.frames/
+.tmp/
+exports/*.mp4
+exports/*.wav
