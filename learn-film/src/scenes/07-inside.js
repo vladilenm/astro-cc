@@ -46,9 +46,9 @@
 
     // the guide top (60 cut only): brand + resume card, in page space above the lesson
     // (resumeCard's title runs into its «Продолжить» button below w ≈ 1300, so the card is 1320 wide)
-    const CR = { x: 960, y: -440, z: 1 }; // camera on the guide top: screen y = page y + 980
-    const RES = { x: 300, y: 470 - 980, w: 1320, h: 200 }; // resumeCard at screen (300, 470)
-    const BRAND = { x: 300, y: 392 - 980 };
+    const CR = { x: 960, y: -500, z: 1 }; // camera on the guide top: screen y = page y + 1040 (lesson header off-frame)
+    const RES = { x: 300, y: 490 - 1040, w: 1320, h: 200 }; // resumeCard at screen (300, 490)
+    const BRAND = { x: 300, y: 412 - 1040 };
     const RES_BTN = [RES.x + RES.w - 175 + 34, RES.y + RES.h / 2 + 18]; // cursor tip on «Продолжить»
 
     // focuses: camera + spotlight hole (page rects)
@@ -79,7 +79,7 @@
     const C_ENTRY = [1624, 1420]; // off-frame bottom right under the task framing
     const C_WAIT = [548, 1030]; // beside «Вставить шаблон»
     const C_TPL = [398, 1018]; // on «Вставить шаблон»
-    const C_REST = [1080, 1006]; // right of the practice header
+    const C_REST = [980, 1006]; // right of the practice header
     const BOX = [cr.x + 44, cr.y + 108]; // criterion 1 check square centre
     const C_BOX = [BOX[0] + 4, BOX[1] + 4];
     const C_OFF = [1676, 1104]; // off the ticked box, past the end of its label
@@ -222,7 +222,14 @@
           g.restore();
         }
         // «Выполнено» lands with a soft green ring (after the manual press only)
-        if (u > s.done && u < s.done + 0.6) ui.ripple(g, dn.x + dn.w / 2, dn.y + dn.h / 2, (u - s.done) / 0.6, { color: P.green, r: 150 });
+        if (u > s.done && u < s.done + 0.6) {
+          const q = (u - s.done) / 0.6;
+          const e = E.outCubic(q);
+          ui.rrect(g, dn.x - 22 * e, dn.y - 22 * e, dn.w + 44 * e, dn.h + 44 * e, dn.h / 2 + 22 * e);
+          g.lineWidth = 3;
+          g.strokeStyle = L.rgba(P.green, 0.7 * (1 - q));
+          g.stroke();
+        }
         if (cut === 60 && cam.y < 700) {
           ui.brand(g, BRAND.x, BRAND.y, { size: 56 });
           if (s.res != null) ui.resumeCard(g, RES.x, RES.y, RES.w, RES.h, { a: ui.appear(u, s.res, 0.5), hover: k(u, s.resHover, 0.3) });
